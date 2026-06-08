@@ -294,6 +294,8 @@ export default function App() {
   // Herramienta de Recorte Manual (Crop)
   const [cropEnabled, setCropEnabled] = useState(false);
   const [cropBox, setCropBox] = useState({ x: 10, y: 10, width: 80, height: 80 }); // En %
+  const [isDraggingCrop, setIsDraggingCrop] = useState(false);
+  const dragStartOffset = useRef({ x: 0, y: 0 });
 
   const [strokeEnabled, setStrokeEnabled] = useState(false);
   const [strokeWidth, setStrokeWidth] = useState(2); 
@@ -549,6 +551,15 @@ export default function App() {
     loadDemo();
   };
 
+  const handleDownloadSinglePng = (img) => {
+    verificarYDescontarCredito(() => {
+      const link = document.createElement('a');
+      link.download = `${img.name}_clean.png`;
+      link.href = img.previewUrl;
+      link.click();
+    });
+  };
+
   const recalculateLayouts = () => {
     let compiledPlanchas = [];
 
@@ -633,6 +644,9 @@ export default function App() {
     });
 
     setPackedSheets(masterRollSheets);
+    if (activePliegoIndex >= masterRollSheets.length) {
+      setActivePliegoIndex(0);
+    }
   };
 
   const generatePDF = async () => {
@@ -796,33 +810,6 @@ export default function App() {
         img.src = st.imageSrc;
       });
     });
-  };
-
-  const openBackgroundRemovalModal = (img) => {
-    setEditingImage(img);
-    setOriginalBackupUrl(img.originalBackupUrl || img.previewUrl);
-    setBgTolerance(img.bgTolerance !== undefined ? img.bgTolerance : 15);
-    setHaloCleanup(img.haloCleanup !== undefined ? img.haloCleanup : 1);
-    
-    // Configuración inicial de colores
-    setColorBorrar1(img.colorBorrar1 || { r: 255, g: 255, b: 255 });
-    setColorBorrar2(img.colorBorrar2 || { r: 0, g: 0, b: 0 });
-    setIsColor2Enabled(img.isColor2Enabled || false);
-    setActiveColorSlot(1);
-
-    // Configuración de Crop
-    setCropEnabled(img.cropEnabled || false);
-    setCropBox(img.cropBox || { x: 10, y: 10, width: 80, height: 80 });
-
-    setBgMode(img.bgMode || 'contiguous'); 
-    setClickCoords({ x: 0, y: 0 }); 
-    setIsBgRemovalActive(img.isBgRemovalActive || false);
-    setStrokeEnabled(img.strokeEnabled || false);
-    setStrokeWidth(img.strokeWidth || 2);
-    setStrokeColor(img.strokeColor || '#ffffff');
-    setRemovalPreviewUrl(img.previewUrl);
-    setEditedAspectRatio(img.aspectRatio || 1);
-    setActiveTab('bg');
   };
 
   // Motor Gráfico de Aislamiento de Canales
@@ -1093,6 +1080,7 @@ export default function App() {
   };
 
   const handleCropMouseDown = (e) => {
+    e.stopPropagation();
     setIsDraggingCrop(true);
     dragStartOffset.current = {
       x: e.clientX,
@@ -1105,11 +1093,15 @@ export default function App() {
     const dx = ((e.clientX - dragStartOffset.current.x) / window.innerWidth) * 100;
     const dy = ((e.clientY - dragStartOffset.current.y) / window.innerHeight) * 100;
 
-    setCropBox(prev => ({
-      ...prev,
-      width: Math.max(10, Math.min(100 - prev.x, prev.width + dx)),
-      height: Math.max(10, Math.min(100 - prev.y, prev.height + dy))
-    }));
+    setCropBox(prev => {
+      const newWidth = Math.max(10, Math.min(100 - prev.x, prev.width + dx));
+      const newHeight = Math.max(10, Math.min(100 - prev.y, prev.height + dy));
+      return {
+        ...prev,
+        width: newWidth,
+        height: newHeight
+      };
+    });
     dragStartOffset.current = { x: e.clientX, y: e.clientY };
   };
 
@@ -1463,7 +1455,7 @@ export default function App() {
 
             {/* SECCIÓN COLAPSABLE 3: SUBIDA DE IMÁGENES */}
             <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl overflow-hidden transition-all">
-              <div className="px-4 py-3 bg-slate-900/80 flex justify-between items-center text-left text-xs font-bold uppercase tracking-wider text-slate-300">
+              <div className="px-4 py-3 bg-slate-900/80 flex justify-between items-center text-left text-xs font-bold uppercase tracking-wider text-slate-300 font-sans">
                 <span className="flex items-center gap-2">
                   <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
                   3. Subir Imágenes
@@ -1541,7 +1533,7 @@ export default function App() {
                       return (
                         <div 
                           key={img.id}
-                          className="bg-slate-950 border border-slate-850 rounded-xl p-2.5 flex gap-2.5 relative hover:border-slate-750 transition-all"
+                          className="bg-slate-950 border border-slate-855 rounded-xl p-2.5 flex gap-2.5 relative hover:border-slate-750 transition-all"
                         >
                           <div className="w-12 h-12 bg-slate-900 rounded-lg p-0.5 flex items-center justify-center border border-slate-800 shrink-0 relative overflow-hidden checkboard-pattern">
                             <img src={img.previewUrl} alt={img.name} className="max-w-full max-h-full object-contain" />
@@ -1645,7 +1637,7 @@ export default function App() {
           <div className="bg-slate-950 border border-slate-800 p-3 rounded-2xl flex flex-col lg:flex-row justify-between items-center gap-3 shadow-md">
             
             <div className="flex items-center gap-2 text-xs">
-              <span className="font-bold text-slate-400">Giro Visual:</span>
+              <span className="font-bold text-slate-400 font-sans">Giro Visual:</span>
               <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
                 <button 
                   onClick={() => setIsRotated(true)}
@@ -1669,9 +1661,9 @@ export default function App() {
             </div>
 
             <div className="text-xs">
-              <span className="font-bold text-slate-400">Ver Pliego Master: </span>
+              <span className="font-bold text-slate-400 font-sans">Ver Pliego Master: </span>
               {packedSheets.length === 0 ? (
-                <span className="text-slate-500 italic">No hay pliegos con material cargado</span>
+                <span className="text-slate-500 italic font-sans">No hay pliegos con material cargado</span>
               ) : (
                 <select 
                   value={activePliegoIndex}
@@ -1759,7 +1751,7 @@ export default function App() {
                   </span>
                 </div>
               ) : (
-                <span className="text-slate-500">Ninguna plantilla interna con stickers ha sido agregada para el armado.</span>
+                <span className="text-slate-500 italic font-sans">Ninguna plantilla interna con stickers ha sido agregada para el armado.</span>
               )}
 
               <div className="flex items-center gap-2.5">
@@ -1955,12 +1947,12 @@ export default function App() {
 
             {activeSheet && (
               <div className="mt-3 flex flex-wrap justify-between items-center text-xs text-slate-400 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
-                <div className="flex gap-4">
+                <div className="flex gap-4 font-sans">
                   <span>Plantillas chicas anidadas: <strong>{activeSheet.packedPlanchas.length}</strong></span>
                   <span>Ancho Útil Master: <strong>{(activeSheet.width - (activeSheet.safeMargin * 2)) / 10} cm</strong></span>
                   <span>Alto Útil Master: <strong>{(activeSheet.height - (activeSheet.safeMargin * 2)) / 10} cm</strong></span>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 font-sans">
                   <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
                   <span>Aprovechamiento del Pliego Master: <strong className="text-cyan-400">{activeSheet.utilizationPercentage}%</strong></span>
                 </div>
@@ -2043,7 +2035,7 @@ export default function App() {
                     {isBgRemovalActive && (
                       <>
                         <div>
-                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Canales de Color a Borrar</span>
+                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2 font-sans">Canales de Color a Borrar</span>
                           <div className="grid grid-cols-2 gap-2 mb-2">
                             <button
                               type="button"
@@ -2080,7 +2072,7 @@ export default function App() {
                               onChange={(e) => setIsColor2Enabled(e.target.checked)}
                               className="rounded border-slate-800 text-cyan-500 cursor-pointer"
                             />
-                            <label htmlFor="enableColor2" className="text-slate-400 cursor-pointer">Habilitar segundo color</label>
+                            <label htmlFor="enableColor2" className="text-slate-400 cursor-pointer font-sans">Habilitar segundo color</label>
                           </div>
                         </div>
 
@@ -2107,7 +2099,7 @@ export default function App() {
                         </div>
 
                         <div>
-                          <div className="flex justify-between items-center mb-1">
+                          <div className="flex justify-between items-center mb-1 font-sans">
                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tolerancia base</span>
                             <span className="text-xs font-mono font-bold text-cyan-400">{bgTolerance}%</span>
                           </div>
@@ -2122,7 +2114,7 @@ export default function App() {
                         </div>
 
                         <div>
-                          <div className="flex justify-between items-center mb-1">
+                          <div className="flex justify-between items-center mb-1 font-sans">
                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                               <span>🧼</span> Limpieza de Halo (Anti-Alias)
                             </span>
@@ -2155,7 +2147,7 @@ export default function App() {
                       />
                     </div>
                     {cropEnabled && (
-                      <div className="space-y-3">
+                      <div className="space-y-3 font-sans">
                         <span className="text-[10px] text-slate-400 block leading-relaxed">
                           Ajusta los límites del recuadro o arrástralo sobre la previsualización del sticker:
                         </span>
@@ -2240,7 +2232,7 @@ export default function App() {
                         </div>
 
                         <div>
-                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Color del Contorno</span>
+                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2 font-sans font-sans">Color del Contorno</span>
                           <div className="flex gap-2 mb-3">
                             <input 
                               type="color" 
@@ -2291,14 +2283,14 @@ export default function App() {
 
                 <button
                   onClick={restoreOriginalImage}
-                  className="py-2.5 px-4 bg-red-950/40 hover:bg-red-950/60 border border-red-900/60 text-red-300 rounded-xl text-xs font-bold transition-colors w-full focus:outline-none"
+                  className="py-2.5 px-4 bg-red-950/40 hover:bg-red-950/60 border border-red-900/60 text-red-300 rounded-xl text-xs font-bold transition-colors w-full focus:outline-none animate-none"
                 >
                   ↩ Deshacer Ediciones y Restablecer
                 </button>
               </div>
 
               <div className="md:col-span-2 flex flex-col gap-2 overflow-hidden justify-center items-center">
-                <span className="text-xs font-bold text-slate-500 self-start mb-1">Previsualización del Sticker (Haz clic sobre el fondo para remover):</span>
+                <span className="text-xs font-bold text-slate-500 self-start mb-1 font-sans font-sans">Previsualización del Sticker (Haz clic sobre el fondo para remover):</span>
                 <div className="flex-1 w-full bg-slate-950 border border-slate-800 rounded-2xl relative flex items-center justify-center p-4 checkboard-pattern overflow-auto">
                   <canvas 
                     ref={previewCanvasRef} 
@@ -2331,7 +2323,7 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                <div className="text-[10px] text-slate-400 text-center flex items-center gap-1.5">
+                <div className="text-[10px] text-slate-400 text-center flex items-center gap-1.5 font-sans">
                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
                   Consejo: Usa "Varita Mágica" y sube el deslizador de "Limpieza de Halo" para borrar impurezas de bordes.
                 </div>
@@ -2362,11 +2354,11 @@ export default function App() {
       {showUpgradeModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 text-center">
-            <h3 className="text-xl font-bold text-white mb-2">¡Límite de descargas alcanzado!</h3>
-            <p className="text-slate-400 text-xs mb-6">Mejora tu plan de taller para continuar planificando sin restricciones y acceder a todas las herramientas.</p>
+            <h3 className="text-xl font-bold text-white mb-2 font-sans">¡Límite de descargas alcanzado!</h3>
+            <p className="text-slate-400 text-xs mb-6 font-sans">Mejora tu plan de taller para continuar planificando sin restricciones y acceder a todas las herramientas.</p>
             <div className="flex flex-col gap-2">
-              <button onClick={() => setShowUpgradeModal(false)} className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold py-2 rounded-xl text-xs">Ver planes de suscripción</button>
-              <button onClick={() => setShowUpgradeModal(false)} className="text-slate-500 hover:text-slate-400 text-xs py-1">Volver más tarde</button>
+              <button onClick={() => setShowUpgradeModal(false)} className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold py-2 rounded-xl text-xs font-sans">Ver planes de suscripción</button>
+              <button onClick={() => setShowUpgradeModal(false)} className="text-slate-500 hover:text-slate-400 text-xs py-1 font-sans">Volver más tarde</button>
             </div>
           </div>
         </div>
