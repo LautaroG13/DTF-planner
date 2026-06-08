@@ -394,6 +394,23 @@ export default function App() {
     }
   }, [editingImage, bgTolerance, colorBorrar1, colorBorrar2, isColor2Enabled, bgMode, clickCoords, originalBackupUrl, isBgRemovalActive, strokeEnabled, strokeWidth, strokeColor, haloCleanup, cropEnabled, cropBox]);
 
+  const openBackgroundRemovalModal = (img) => {
+    setEditingImage(img);
+    setOriginalBackupUrl(img.originalBackupUrl || img.previewUrl);
+    setBgTolerance(img.bgTolerance !== undefined ? img.bgTolerance : 15);
+    setHaloCleanup(img.haloCleanup !== undefined ? img.haloCleanup : 1);
+    setTargetBgColor(img.targetBgColor || { r: 255, g: 255, b: 255 });
+    setBgMode(img.bgMode || 'contiguous'); 
+    setClickCoords({ x: 0, y: 0 }); 
+    setIsBgRemovalActive(img.isBgRemovalActive || false);
+    setStrokeEnabled(img.strokeEnabled || false);
+    setStrokeWidth(img.strokeWidth || 2);
+    setStrokeColor(img.strokeColor || '#ffffff');
+    setRemovalPreviewUrl(img.previewUrl);
+    setEditedAspectRatio(img.aspectRatio || 1);
+    setActiveTab('bg');
+  };
+
   const handleLoginGoogle = async () => {
     try {
       const provider = new GoogleAuthProvider();
@@ -401,7 +418,9 @@ export default function App() {
       await signInWithPopup(auth, provider);
     } catch (err) {
       console.error("Error al iniciar sesión con Google: ", err);
-      if (err.code === 'auth/web-storage-unsupported' || err.code === 'auth/iframe-closed-before-user-grant') {
+      if (err.code === 'auth/admin-restricted-operation') {
+        alert("El inicio de sesión con Google está restringido. Por favor, asegúrate de activar el proveedor 'Google' en Authentication -> Sign-in method dentro de la consola de Firebase.");
+      } else if (err.code === 'auth/web-storage-unsupported' || err.code === 'auth/iframe-closed-before-user-grant') {
         console.warn("Falla de Iframe o bloqueo. Iniciando sesión anónima.");
       }
     }
@@ -1233,7 +1252,7 @@ export default function App() {
           </div>
         </div>
         
-        {/* Controles de Firebase Auth y Perfil */}
+        {/* Controles de Firebase Auth e Perfil */}
         <div className="flex flex-wrap gap-4 items-center">
           {user && !user.isAnonymous ? (
             <div className="flex items-center gap-3 bg-slate-900/50 border border-slate-800 px-3.5 py-1.5 rounded-2xl">
@@ -1248,7 +1267,7 @@ export default function App() {
           ) : (
             <button 
               onClick={handleLoginGoogle}
-              className="bg-slate-900 hover:bg-slate-850 text-slate-200 border border-slate-800 px-4 py-2 rounded-2xl text-xs font-bold transition-all shadow-sm flex items-center gap-2"
+              className="bg-slate-900 hover:bg-slate-850 text-slate-200 border border-slate-800 px-4 py-2 rounded-2xl text-xs font-bold transition-all shadow-sm flex items-center gap-2 cursor-pointer"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12.24 10.285V13.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.866-3.577-7.866-8s3.536-8 7.866-8c2.46 0 4.105 1.025 5.047 1.926l2.427-2.334C17.955 2.192 15.34 1 12.24 1 6.12 1 1.16 6.12 1 12.24s5.12 11.24 11.24 11.24c6.38 0 10.62-4.474 10.62-10.782 0-.728-.08-1.284-.176-1.848H12.24z"/>
@@ -1261,7 +1280,7 @@ export default function App() {
           <div className="flex flex-wrap gap-3 items-center text-sm">
             <button 
               onClick={() => setShowUpgradeModal(true)}
-              className="bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black px-3.5 py-1.5 rounded-xl text-xs transition-all shadow-sm shrink-0"
+              className="bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black px-3.5 py-1.5 rounded-xl text-xs transition-all shadow-sm shrink-0 cursor-pointer"
             >
               👑 {PLANES[userProfile.plan || 'libre'].nombre}
             </button>
@@ -1312,7 +1331,7 @@ export default function App() {
                       <button 
                         type="button"
                         onClick={handleAddPliegoMaster}
-                        className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer"
+                        className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer focus:outline-none"
                       >
                         + Agregar Pliego
                       </button>
@@ -1347,7 +1366,7 @@ export default function App() {
                                       setActivePliegoIndex(Math.max(0, idx - 1));
                                     }
                                   }}
-                                  className="text-red-400 hover:text-red-300 text-[10px]"
+                                  className="text-red-400 hover:text-red-300 text-[10px] focus:outline-none cursor-pointer"
                                   title="Eliminar Pliego"
                                 >
                                   ✕
@@ -1456,8 +1475,9 @@ export default function App() {
                         </div>
                         {planchas.length > 1 && (
                           <button 
+                            type="button"
                             onClick={() => handleRemovePlancha(plancha.id)}
-                            className="text-red-400 hover:text-red-300 text-xs font-bold px-1.5 py-0.5 rounded focus:outline-none"
+                            className="text-red-400 hover:text-red-300 text-xs font-bold px-1.5 py-0.5 rounded focus:outline-none cursor-pointer"
                             title="Eliminar esta plantilla"
                           >
                             ✕
@@ -1485,7 +1505,7 @@ export default function App() {
                           type="number"
                           value={newPlanchaWidth}
                           onChange={(e) => setNewPlanchaWidth(parseInt(e.target.value) || 1)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200 focus:outline-none"
                           min="5"
                           max="58"
                         />
@@ -1496,7 +1516,7 @@ export default function App() {
                           type="number"
                           value={newPlanchaHeight}
                           onChange={(e) => setNewPlanchaHeight(parseInt(e.target.value) || 1)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200 focus:outline-none"
                           min="5"
                           max="95"
                         />
@@ -1510,7 +1530,7 @@ export default function App() {
                           type="number"
                           value={newPlanchaSpacing}
                           onChange={(e) => setNewPlanchaSpacing(parseInt(e.target.value) || 0)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200 focus:outline-none"
                           min="1"
                         />
                       </div>
@@ -1520,7 +1540,7 @@ export default function App() {
                           type="number"
                           value={newPlanchaSafeMargin}
                           onChange={(e) => setNewPlanchaSafeMargin(parseInt(e.target.value) || 0)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200 focus:outline-none"
                           min="0"
                         />
                       </div>
@@ -1537,7 +1557,7 @@ export default function App() {
                         />
                         <button 
                           type="submit"
-                          className="flex-1 py-1.5 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white font-extrabold rounded-lg text-xs focus:outline-none"
+                          className="flex-1 py-1.5 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white font-extrabold rounded-lg text-xs focus:outline-none cursor-pointer"
                         >
                           + Crear Plantilla
                         </button>
@@ -1643,44 +1663,42 @@ export default function App() {
                             <div className="flex justify-between items-start gap-1">
                               <h4 className="font-bold text-slate-200 truncate pr-4 text-[11px]">{img.name}</h4>
                               <button 
+                                type="button"
                                 onClick={() => removeImage(img.id)}
-                                className="absolute top-2 right-2 text-slate-500 hover:text-red-400 transition-colors focus:outline-none"
+                                className="absolute top-2 right-2 text-slate-500 hover:text-red-400 transition-colors focus:outline-none cursor-pointer"
                               >
                                 ✕
                               </button>
                             </div>
 
-                            {/* SOLUCIÓN AL BUG DE LAYOUT: Estilo responsivo y max-width de truncate para alinear el coste perfectamente dentro de la tarjeta */}
-                            <div className="flex justify-between items-center text-[10px] mt-1 gap-2">
-                              <div className="flex items-center gap-1 text-[10px] min-w-0 flex-1">
-                                <span className="text-slate-500 shrink-0">Plantilla:</span>
-                                <select 
-                                  value={img.planchaId} 
-                                  onChange={(e) => updateImageProperty(img.id, 'planchaId', e.target.value)}
-                                  className="bg-transparent border-none text-slate-300 font-semibold focus:outline-none p-0 cursor-pointer text-[10px] max-w-[120px] truncate"
-                                >
-                                  {planchas.map(p => (
-                                    <option key={p.id} value={p.id} className="bg-slate-900">{p.name}</option>
-                                  ))}
-                                </select>
-                              </div>
-                              <span className="text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-900/60 px-1.5 py-0.5 rounded-md font-mono shrink-0" title="Costo unitario basado en mm²">
-                                {currencySymbol}{calcularCostoStickerCm2(img.targetSize || 40, (img.targetSize || 40) / (img.aspectRatio || 1))} c/u
-                              </span>
+                            {/* Dropdown de Plantilla limpia */}
+                            <div className="flex items-center gap-1 text-[10px] mt-1">
+                              <span className="text-slate-500 shrink-0">Plantilla:</span>
+                              <select 
+                                value={img.planchaId} 
+                                onChange={(e) => updateImageProperty(img.id, 'planchaId', e.target.value)}
+                                className="bg-transparent border-none text-slate-300 font-semibold focus:outline-none p-0 cursor-pointer text-[10px] max-w-[150px] truncate"
+                              >
+                                {planchas.map(p => (
+                                  <option key={p.id} value={p.id} className="bg-slate-900">{p.name}</option>
+                                ))}
+                              </select>
                             </div>
 
                             <div className="flex items-center justify-between gap-1.5 mt-1.5">
                               <div className="flex items-center gap-1.5 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-850">
                                 <button 
+                                  type="button"
                                   onClick={() => updateImageProperty(img.id, 'quantity', Math.max(1, (img.quantity || 1) - 1))}
-                                  className="text-slate-400 hover:text-slate-200 font-bold px-1 text-[11px]"
+                                  className="text-slate-400 hover:text-slate-200 font-bold px-1 text-[11px] cursor-pointer focus:outline-none"
                                 >
                                   -
                                 </button>
                                 <span className="font-bold min-w-4 text-center text-slate-100 text-[11px]">{img.quantity}</span>
                                 <button 
+                                  type="button"
                                   onClick={() => updateImageProperty(img.id, 'quantity', (img.quantity || 1) + 1)}
-                                  className="text-slate-400 hover:text-slate-200 font-bold px-1 text-[11px]"
+                                  className="text-slate-400 hover:text-slate-200 font-bold px-1 text-[11px] cursor-pointer focus:outline-none"
                                 >
                                   +
                                 </button>
@@ -1698,22 +1716,32 @@ export default function App() {
                                 />
                                 <span className="text-[10px] text-slate-500">cm</span>
                               </div>
+                            </div>
 
-                              <button 
-                                onClick={() => handleDownloadSinglePng(img)}
-                                className="text-[10px] text-emerald-400 hover:text-emerald-350 font-bold flex items-center gap-0.5 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/40 transition-colors focus:outline-none"
-                                title="Descargar este sticker limpio"
-                              >
-                                📥 PNG
-                              </button>
+                            {/* SOLUCIÓN AL BUG DE LAYOUT: Fila 4 con Costo Unitario, botón de descarga PNG y botón Editar coexistiendo perfectamente */}
+                            <div className="flex justify-between items-center mt-2.5 pt-2 border-t border-slate-850/60 gap-1.5">
+                              <span className="text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-900/60 px-1.5 py-0.5 rounded-md font-mono text-[10px] shrink-0" title="Costo unitario basado en mm²">
+                                {currencySymbol}{calcularCostoStickerCm2(img.targetSize || 40, (img.targetSize || 40) / (img.aspectRatio || 1))} c/u
+                              </span>
+                              
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button 
+                                  type="button"
+                                  onClick={() => handleDownloadSinglePng(img)}
+                                  className="text-[10px] text-emerald-400 hover:text-emerald-350 font-bold flex items-center gap-0.5 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/40 transition-colors focus:outline-none shrink-0 cursor-pointer"
+                                  title="Descargar este sticker limpio"
+                                >
+                                  📥 PNG
+                                </button>
 
-                              {/* SOLUCIÓN AL BUG DE EDITAR: Botón corregido con openBackgroundRemovalModal asignado perfectamente */}
-                              <button
-                                onClick={() => openBackgroundRemovalModal(img)}
-                                className="text-[10px] text-cyan-400 hover:text-cyan-350 font-bold flex items-center gap-0.5 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/40 transition-colors focus:outline-none cursor-pointer"
-                              >
-                                🎨 Editar
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openBackgroundRemovalModal(img)}
+                                  className="text-[10px] text-cyan-400 hover:text-cyan-350 font-bold flex items-center gap-0.5 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/40 transition-colors focus:outline-none cursor-pointer shrink-0"
+                                >
+                                  🎨 Editar
+                                </button>
+                              </div>
                             </div>
 
                           </div>
@@ -1739,7 +1767,7 @@ export default function App() {
               <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
                 <button 
                   onClick={() => setIsRotated(true)}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1 focus:outline-none ${
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1 focus:outline-none cursor-pointer ${
                     isRotated ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
                   }`}
                   title="Optimizado para monitores de laptop/computadora"
@@ -1748,7 +1776,7 @@ export default function App() {
                 </button>
                 <button 
                   onClick={() => setIsRotated(false)}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1 focus:outline-none ${
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1 focus:outline-none cursor-pointer ${
                     !isRotated ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
                   }`}
                   title="Orientación tradicional vertical"
@@ -1781,14 +1809,14 @@ export default function App() {
               <button 
                 onClick={handleDownloadPliegoPng}
                 disabled={packedSheets.length === 0}
-                className="px-4 py-2.5 bg-slate-900 border border-slate-800 hover:bg-slate-850 text-slate-200 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center gap-2"
+                className="px-4 py-2.5 bg-slate-900 border border-slate-800 hover:bg-slate-850 text-slate-200 font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 cursor-pointer focus:outline-none"
               >
                 Descargar PNG de Pliego
               </button>
               <button 
                 onClick={() => verificarYDescontarCredito(generatePDF)}
                 disabled={packedSheets.length === 0 || isGeneratingPdf}
-                className={`px-6 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all focus:outline-none ${
+                className={`px-6 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all focus:outline-none cursor-pointer ${
                   packedSheets.length === 0 
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50' 
                     : isGeneratingPdf 
@@ -2075,7 +2103,7 @@ export default function App() {
               </div>
               <button 
                 onClick={() => setEditingImage(null)}
-                className="text-slate-400 hover:text-white text-lg font-bold focus:outline-none"
+                className="text-slate-400 hover:text-white text-lg font-bold focus:outline-none cursor-pointer"
               >
                 ✕
               </button>
@@ -2381,7 +2409,7 @@ export default function App() {
 
                 <button
                   onClick={restoreOriginalImage}
-                  className="py-2.5 px-4 bg-red-950/40 hover:bg-red-950/60 border border-red-900/60 text-red-300 rounded-xl text-xs font-bold transition-colors w-full focus:outline-none animate-none"
+                  className="py-2.5 px-4 bg-red-950/40 hover:bg-red-950/60 border border-red-900/60 text-red-300 rounded-xl text-xs font-bold transition-colors w-full focus:outline-none animate-none cursor-pointer"
                 >
                   ↩ Deshacer Ediciones y Restablecer
                 </button>
@@ -2431,13 +2459,13 @@ export default function App() {
             <div className="flex justify-end gap-3 pt-4 border-t border-slate-800 mt-2">
               <button 
                 onClick={() => setEditingImage(null)}
-                className="py-2 px-5 rounded-xl text-xs font-bold bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-200 focus:outline-none"
+                className="py-2 px-5 rounded-xl text-xs font-bold bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-200 focus:outline-none cursor-pointer"
               >
                 Cancelar
               </button>
               <button 
                 onClick={saveTransparentImage}
-                className="py-2 px-6 rounded-xl text-xs font-extrabold bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-md shadow-cyan-500/10 focus:outline-none"
+                className="py-2 px-6 rounded-xl text-xs font-extrabold bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-md shadow-cyan-500/10 focus:outline-none cursor-pointer"
               >
                 Guardar y Aplicar al Layout
               </button>
@@ -2458,7 +2486,7 @@ export default function App() {
               </div>
               <button 
                 onClick={() => setShowUpgradeModal(false)}
-                className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-xl transition-all focus:outline-none"
+                className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-xl transition-all focus:outline-none cursor-pointer"
               >
                 ✕
               </button>
@@ -2490,7 +2518,7 @@ export default function App() {
                         <span className="text-[10px] text-slate-500 font-mono ml-1">ARS /mes</span>
                       </div>
 
-                      {/* DETALLE COMPLETO DE LO QUE TRAE CADA PLAN (Corregido el placeholder en blanco) */}
+                      {/* DETALLE COMPLETO DE LO QUE TRAE CADA PLAN */}
                       <ul className="text-xs text-slate-400 space-y-2.5 my-4 border-t border-slate-800 pt-4 mb-6">
                         <li className="flex items-center gap-1.5">
                           <span className="text-cyan-400 font-bold">✓</span> 
@@ -2542,7 +2570,7 @@ export default function App() {
                       
                       <button 
                         onClick={() => handleSimularPlan(key)}
-                        className="w-full text-center py-1.5 rounded-xl text-[10px] font-mono font-bold text-slate-400 hover:text-white bg-slate-950/80 border border-slate-850 hover:border-slate-700 transition-all focus:outline-none"
+                        className="w-full text-center py-1.5 rounded-xl text-[10px] font-mono font-bold text-slate-400 hover:text-white bg-slate-950/80 border border-slate-850 hover:border-slate-700 transition-all focus:outline-none cursor-pointer"
                       >
                         ⚡ Simular Activación (Demo)
                       </button>
