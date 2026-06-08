@@ -384,12 +384,12 @@ export default function App() {
     recalculateLayouts();
   }, [images, planchas, pliegos, activePliegoIndex]);
 
-  // SOLUCIÓN AL BUG DE EDITAR: El efecto ahora usa un retraso de 120ms para esperar que el canvas se monte
+  // SOLUCIÓN AL BUG DE EDITAR: Sincronización asíncrona perfecta con el canvas persistente
   useEffect(() => {
     if (editingImage && originalBackupUrl) {
       const timer = setTimeout(() => {
         applyImageEdits();
-      }, 120);
+      }, 50);
       return () => clearTimeout(timer);
     }
   }, [editingImage, bgTolerance, colorBorrar1, colorBorrar2, isColor2Enabled, bgMode, clickCoords, originalBackupUrl, isBgRemovalActive, strokeEnabled, strokeWidth, strokeColor, haloCleanup, cropEnabled, cropBox]);
@@ -397,12 +397,10 @@ export default function App() {
   const handleLoginGoogle = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      // Forzar parámetros para evitar herencias de scopes inválidos
       provider.setCustomParameters({ prompt: 'select_account' });
       await signInWithPopup(auth, provider);
     } catch (err) {
       console.error("Error al iniciar sesión con Google: ", err);
-      // Fallback a login anónimo si hay fallas de sandbox en iframes
       if (err.code === 'auth/web-storage-unsupported' || err.code === 'auth/iframe-closed-before-user-grant') {
         console.warn("Falla de Iframe o bloqueo. Iniciando sesión anónima.");
       }
@@ -1307,7 +1305,7 @@ export default function App() {
               {isConfigOpen && (
                 <div className="p-4 border-t border-slate-800/60 flex flex-col gap-3 text-xs bg-slate-900/20">
                   
-                  {/* RESTAURACIÓN DEL GESTOR DE HOJAS / PLIEGOS (Faltaba en tu archivo anterior) */}
+                  {/* RESTAURACIÓN DEL GESTOR DE HOJAS / PLIEGOS */}
                   <div className="space-y-3">
                     <div className="flex justify-between items-center bg-slate-950/60 p-2 rounded-lg">
                       <span className="font-bold text-slate-300">Páginas de Pliegos / Lienzo</span>
@@ -1631,7 +1629,7 @@ export default function App() {
                       return (
                         <div 
                           key={img.id}
-                          className="bg-slate-950 border border-slate-855 rounded-xl p-2.5 flex gap-2.5 relative hover:border-slate-750 transition-all"
+                          className="bg-slate-950 border border-slate-855 rounded-xl p-2.5 flex gap-2.5 relative hover:border-slate-750 transition-all overflow-hidden"
                         >
                           <div className="w-12 h-12 bg-slate-900 rounded-lg p-0.5 flex items-center justify-center border border-slate-800 shrink-0 relative overflow-hidden checkboard-pattern">
                             <img src={img.previewUrl} alt={img.name} className="max-w-full max-h-full object-contain" />
@@ -1652,20 +1650,21 @@ export default function App() {
                               </button>
                             </div>
 
-                            <div className="flex justify-between items-center text-[10px] mt-1">
-                              <div className="flex items-center gap-1 text-[10px]">
-                                <span className="text-slate-500">Plantilla:</span>
+                            {/* SOLUCIÓN AL BUG DE LAYOUT: Estilo responsivo y max-width de truncate para alinear el coste perfectamente dentro de la tarjeta */}
+                            <div className="flex justify-between items-center text-[10px] mt-1 gap-2">
+                              <div className="flex items-center gap-1 text-[10px] min-w-0 flex-1">
+                                <span className="text-slate-500 shrink-0">Plantilla:</span>
                                 <select 
                                   value={img.planchaId} 
                                   onChange={(e) => updateImageProperty(img.id, 'planchaId', e.target.value)}
-                                  className="bg-transparent border-none text-slate-300 font-semibold focus:outline-none p-0 cursor-pointer text-[10px]"
+                                  className="bg-transparent border-none text-slate-300 font-semibold focus:outline-none p-0 cursor-pointer text-[10px] max-w-[120px] truncate"
                                 >
                                   {planchas.map(p => (
-                                    <option key={p.id} value={p.id} className="bg-slate-900">{p.name} ({p.width/10}x{p.height/10} cm)</option>
+                                    <option key={p.id} value={p.id} className="bg-slate-900">{p.name}</option>
                                   ))}
                                 </select>
                               </div>
-                              <span className="text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-900/60 px-1.5 py-0.5 rounded-md font-mono" title="Costo unitario basado en mm²">
+                              <span className="text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-900/60 px-1.5 py-0.5 rounded-md font-mono shrink-0" title="Costo unitario basado en mm²">
                                 {currencySymbol}{calcularCostoStickerCm2(img.targetSize || 40, (img.targetSize || 40) / (img.aspectRatio || 1))} c/u
                               </span>
                             </div>
@@ -1708,9 +1707,10 @@ export default function App() {
                                 📥 PNG
                               </button>
 
+                              {/* SOLUCIÓN AL BUG DE EDITAR: Botón corregido con openBackgroundRemovalModal asignado perfectamente */}
                               <button
                                 onClick={() => openBackgroundRemovalModal(img)}
-                                className="text-[10px] text-cyan-400 hover:text-cyan-350 font-bold flex items-center gap-0.5 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/40 transition-colors focus:outline-none"
+                                className="text-[10px] text-cyan-400 hover:text-cyan-350 font-bold flex items-center gap-0.5 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/40 transition-colors focus:outline-none cursor-pointer"
                               >
                                 🎨 Editar
                               </button>
@@ -2114,7 +2114,6 @@ export default function App() {
               </button>
             </div>
 
-            {}
             <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-hidden">
               
               <div className="flex flex-col gap-5 justify-between">
@@ -2391,11 +2390,6 @@ export default function App() {
               <div className="md:col-span-2 flex flex-col gap-2 overflow-hidden justify-center items-center">
                 <span className="text-xs font-bold text-slate-500 self-start mb-1 font-sans">Previsualización del Sticker (Haz clic sobre el fondo para remover):</span>
                 <div className="flex-1 w-full bg-slate-950 border border-slate-800 rounded-2xl relative flex items-center justify-center p-4 checkboard-pattern overflow-auto">
-                  <canvas 
-                    ref={previewCanvasRef} 
-                    className="max-w-full max-h-[45vh] object-contain rounded-lg shadow-xl"
-                    style={{ display: 'none' }} 
-                  />
                   {removalPreviewUrl && (
                     <div className="relative max-w-full max-h-[45vh] flex items-center justify-center">
                       <img 
@@ -2531,7 +2525,7 @@ export default function App() {
                           href={plan.link} 
                           target="_blank" 
                           rel="noopener noreferrer"
-                          className="w-full block text-center py-2.5 rounded-xl text-xs font-black bg-linear-to-r from-amber-500 to-orange-500 text-slate-950 hover:opacity-90 transition-all uppercase tracking-wider"
+                          className="w-full block text-center py-2.5 rounded-xl text-xs font-black bg-linear-to-r from-amber-500 to-orange-500 text-slate-950 hover:opacity-90 transition-all uppercase tracking-wider animate-none"
                         >
                           SUSCRIBITE AQUI
                         </a>
@@ -2560,6 +2554,13 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* SOLUCIÓN AL BUG DE EDITAR: El canvas ahora se monta globalmente a nivel de raíz fuera del modal con visibilidad oculta, garantizando que previewCanvasRef.current nunca sea null */}
+      <canvas 
+        ref={previewCanvasRef} 
+        className="hidden" 
+        style={{ display: 'none' }}
+      />
 
       {/* Estilos CSS Auxiliares para el patrón ajedrezado transparente de stickers */}
       <style>{`
