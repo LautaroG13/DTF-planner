@@ -1641,114 +1641,57 @@ export default function App() {
 
               {isImagesListOpen && (
                 <div className="p-3 border-t border-slate-800/60 bg-slate-900/10 flex flex-col gap-2 max-h-87.5 overflow-y-auto">
-                  {images.length === 0 ? (
-                    <div className="text-xs text-slate-500 text-center py-6 italic">No hay imágenes. Sube tus diseños y asígnalos a tu plantilla chica.</div>
-                  ) : (
-                    images.map((img) => {
-                      const currentPlancha = planchas.find(p => p.id === img.planchaId) || { name: 'Sin Asignar', color: '#6B7280' };
-                      return (
-                        <div 
-                          key={img.id}
-                          className="bg-slate-950 border border-slate-855 rounded-xl p-2.5 flex gap-2.5 relative hover:border-slate-750 transition-all overflow-hidden"
-                        >
-                          <div className="w-12 h-12 bg-slate-900 rounded-lg p-0.5 flex items-center justify-center border border-slate-800 shrink-0 relative overflow-hidden checkboard-pattern">
-                            <img src={img.previewUrl} alt={img.name} className="max-w-full max-h-full object-contain" />
-                            <span 
-                              className="absolute bottom-0 left-0 right-0 h-1" 
-                              style={{ backgroundColor: currentPlancha.color }}
-                            ></span>
-                          </div>
+                    {images.length === 0 ? (
+  <div className="text-xs text-slate-500 text-center py-6 italic">No hay imágenes. Sube tus diseños y asígnalos a tu plantilla chica.</div>
+) : (
+  images.map((img) => {
+    const currentPlancha = planchas.find(p => p.id === img.planchaId) || { name: 'Sin Asignar', color: '#6B7280' };
+    return (
+      <div 
+        key={img.id}
+        className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex flex-col gap-2 transition-all hover:border-slate-700"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-slate-900 rounded-lg p-0.5 flex items-center justify-center border border-slate-800 shrink-0 relative overflow-hidden checkboard-pattern">
+            <img src={img.previewUrl} alt={img.name} className="max-w-full max-h-full object-contain" />
+            <span className="absolute bottom-0 left-0 right-0 h-1" style={{ backgroundColor: currentPlancha.color }}></span>
+          </div>
+          
+          <div className="flex-1 min-w-0">
+            <h4 className="font-bold text-slate-200 truncate text-[11px]">{img.name}</h4>
+            <select 
+              value={img.planchaId} 
+              onChange={(e) => updateImageProperty(img.id, 'planchaId', e.target.value)}
+              className="bg-transparent border-none text-slate-400 font-semibold focus:outline-none p-0 cursor-pointer text-[10px] truncate w-full"
+            >
+              {planchas.map(p => <option key={p.id} value={p.id} className="bg-slate-900">{p.name}</option>)}
+            </select>
+          </div>
+        </div>
 
-                          <div className="flex-1 flex flex-col gap-1 min-w-0 text-xs">
-                            <div className="flex justify-between items-start gap-1">
-                              <h4 className="font-bold text-slate-200 truncate pr-4 text-[11px]">{img.name}</h4>
-                              <button 
-                                type="button"
-                                onClick={() => removeImage(img.id)}
-                                className="absolute top-2 right-2 text-slate-500 hover:text-red-400 transition-colors focus:outline-none cursor-pointer"
-                              >
-                                ✕
-                              </button>
-                            </div>
+        <div className="flex justify-between items-center mt-1 border-t border-slate-800 pt-2">
+          <div className="flex items-center gap-1.5 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-850">
+            <button type="button" onClick={() => updateImageProperty(img.id, 'quantity', Math.max(1, (img.quantity || 1) - 1))} className="text-slate-400 font-bold px-1 text-[11px] cursor-pointer">-</button>
+            <span className="font-bold min-w-4 text-center text-slate-100 text-[11px]">{img.quantity}</span>
+            <button type="button" onClick={() => updateImageProperty(img.id, 'quantity', (img.quantity || 1) + 1)} className="text-slate-400 font-bold px-1 text-[11px] cursor-pointer">+</button>
+          </div>
+          
+          <span className="text-emerald-400 font-bold text-[10px] font-mono">
+            {currencySymbol}{calcularCostoStickerCm2(img.targetSize || 40, (img.targetSize || 40) / (img.aspectRatio || 1))} c/u
+          </span>
 
-                            {/* Dropdown de Plantilla limpia */}
-                            <div className="flex items-center gap-1 text-[10px] mt-1">
-                              <span className="text-slate-500 shrink-0">Plantilla:</span>
-                              <select 
-                                value={img.planchaId} 
-                                onChange={(e) => updateImageProperty(img.id, 'planchaId', e.target.value)}
-                                className="bg-transparent border-none text-slate-300 font-semibold focus:outline-none p-0 cursor-pointer text-[10px] max-w-[150px] truncate"
-                              >
-                                {planchas.map(p => (
-                                  <option key={p.id} value={p.id} className="bg-slate-900">{p.name}</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div className="flex items-center justify-between gap-1.5 mt-1.5">
-                              <div className="flex items-center gap-1.5 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-850">
-                                <button 
-                                  type="button"
-                                  onClick={() => updateImageProperty(img.id, 'quantity', Math.max(1, (img.quantity || 1) - 1))}
-                                  className="text-slate-400 hover:text-slate-200 font-bold px-1 text-[11px] cursor-pointer focus:outline-none"
-                                >
-                                  -
-                                </button>
-                                <span className="font-bold min-w-4 text-center text-slate-100 text-[11px]">{img.quantity}</span>
-                                <button 
-                                  type="button"
-                                  onClick={() => updateImageProperty(img.id, 'quantity', (img.quantity || 1) + 1)}
-                                  className="text-slate-400 hover:text-slate-200 font-bold px-1 text-[11px] cursor-pointer focus:outline-none"
-                                >
-                                  +
-                                </button>
-                              </div>
-
-                              <div className="flex items-center gap-1">
-                                <input 
-                                  type="number" 
-                                  value={img.targetSize ? img.targetSize / 10 : 4} 
-                                  onChange={(e) => updateImageProperty(img.id, 'targetSize', (parseFloat(e.target.value) || 2) * 10)}
-                                  className="w-10 bg-slate-900 border border-slate-850 rounded px-1 py-0.5 text-center text-[11px] text-slate-100 focus:outline-none"
-                                  min="1"
-                                  max="50"
-                                  step="0.5"
-                                />
-                                <span className="text-[10px] text-slate-500">cm</span>
-                              </div>
-                            </div>
-
-                            {/* SOLUCIÓN AL BUG DE LAYOUT: Fila 4 con Costo Unitario, botón de descarga PNG y botón Editar coexistiendo perfectamente */}
-                            <div className="flex justify-between items-center mt-2.5 pt-2 border-t border-slate-850/60 gap-1.5">
-                              <span className="text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-900/60 px-1.5 py-0.5 rounded-md font-mono text-[10px] shrink-0" title="Costo unitario basado en mm²">
-                                {currencySymbol}{calcularCostoStickerCm2(img.targetSize || 40, (img.targetSize || 40) / (img.aspectRatio || 1))} c/u
-                              </span>
-                              
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <button 
-                                  type="button"
-                                  onClick={() => handleDownloadSinglePng(img)}
-                                  className="text-[10px] text-emerald-400 hover:text-emerald-350 font-bold flex items-center gap-0.5 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/40 transition-colors focus:outline-none shrink-0 cursor-pointer"
-                                  title="Descargar este sticker limpio"
-                                >
-                                  📥 PNG
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => openBackgroundRemovalModal(img)}
-                                  className="text-[10px] text-cyan-400 hover:text-cyan-350 font-bold flex items-center gap-0.5 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/40 transition-colors focus:outline-none cursor-pointer shrink-0"
-                                >
-                                  🎨 Editar
-                                </button>
-                              </div>
-                            </div>
-
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
+          <button
+            type="button"
+            onClick={() => openBackgroundRemovalModal(img)}
+            className="text-[10px] text-cyan-400 font-bold bg-cyan-950/40 px-2 py-1 rounded border border-cyan-800/40 cursor-pointer hover:bg-cyan-900"
+          >
+            🎨 Editar
+          </button>
+        </div>
+      </div>
+    );
+  })
+)}
                 </div>
               )}
             </div>
