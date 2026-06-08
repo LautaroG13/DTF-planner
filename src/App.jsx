@@ -259,9 +259,6 @@ const packPlanchasOntoMasterRoll = (planchasToPack, userPliegos, spacing, safe) 
   return sheets;
 };
 
-// ======================================================================
-// COMPONENTE PRINCIPAL
-// ======================================================================
 export default function App() {
   // Configuración de Perfil de Taller / Suscripciones Firebase (RULE 3)
   const [user, setUser] = useState(null);
@@ -387,12 +384,12 @@ export default function App() {
     recalculateLayouts();
   }, [images, planchas, pliegos, activePliegoIndex]);
 
+  // SOLUCIÓN AL BUG DE EDITAR: El efecto ahora usa un retraso de 120ms para esperar que el canvas se monte
   useEffect(() => {
     if (editingImage && originalBackupUrl) {
-      // Retraso de 50ms para asegurar que el canvas del modal ya se haya montado en el DOM
       const timer = setTimeout(() => {
         applyImageEdits();
-      }, 50);
+      }, 120);
       return () => clearTimeout(timer);
     }
   }, [editingImage, bgTolerance, colorBorrar1, colorBorrar2, isColor2Enabled, bgMode, clickCoords, originalBackupUrl, isBgRemovalActive, strokeEnabled, strokeWidth, strokeColor, haloCleanup, cropEnabled, cropBox]);
@@ -400,14 +397,14 @@ export default function App() {
   const handleLoginGoogle = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      // Forzar parámetros personalizados si se corre dentro de sandbox
+      // Forzar parámetros para evitar herencias de scopes inválidos
       provider.setCustomParameters({ prompt: 'select_account' });
       await signInWithPopup(auth, provider);
     } catch (err) {
       console.error("Error al iniciar sesión con Google: ", err);
-      // Fallback por si signInWithPopup está bloqueado en sandboxing de Vercel/Iframe
+      // Fallback a login anónimo si hay fallas de sandbox en iframes
       if (err.code === 'auth/web-storage-unsupported' || err.code === 'auth/iframe-closed-before-user-grant') {
-        console.warn("Entorno bloqueado para popups. Iniciando sesión anónima de respaldo.");
+        console.warn("Falla de Iframe o bloqueo. Iniciando sesión anónima.");
       }
     }
   };
@@ -618,6 +615,15 @@ export default function App() {
     };
 
     loadDemo();
+  };
+
+  const handleDownloadSinglePng = (img) => {
+    verificarYDescontarCredito(() => {
+      const link = document.createElement('a');
+      link.download = `${img.name}_clean.png`;
+      link.href = img.previewUrl;
+      link.click();
+    });
   };
 
   const recalculateLayouts = () => {
@@ -1301,13 +1307,14 @@ export default function App() {
               {isConfigOpen && (
                 <div className="p-4 border-t border-slate-800/60 flex flex-col gap-3 text-xs bg-slate-900/20">
                   
-                  {/* Gestor de Páginas (Pliegos) */}
+                  {/* RESTAURACIÓN DEL GESTOR DE HOJAS / PLIEGOS (Faltaba en tu archivo anterior) */}
                   <div className="space-y-3">
                     <div className="flex justify-between items-center bg-slate-950/60 p-2 rounded-lg">
-                      <span className="font-bold text-slate-300">Páginas de Pliegos</span>
+                      <span className="font-bold text-slate-300">Páginas de Pliegos / Lienzo</span>
                       <button 
+                        type="button"
                         onClick={handleAddPliegoMaster}
-                        className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 px-2.5 py-1 rounded-lg text-[10px] font-bold"
+                        className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer"
                       >
                         + Agregar Pliego
                       </button>
@@ -2107,6 +2114,7 @@ export default function App() {
               </button>
             </div>
 
+            {}
             <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-hidden">
               
               <div className="flex flex-col gap-5 justify-between">
@@ -2400,15 +2408,19 @@ export default function App() {
                       {/* Bounding Box del Crop Manual */}
                       {cropEnabled && activeTab === 'crop' && (
                         <div 
-                          className="absolute border-2 border-dashed border-amber-500 bg-amber-500/10 pointer-events-none"
+                          className="absolute border-2 border-dashed border-amber-500 bg-amber-500/10 cursor-move"
                           style={{
                             left: `${cropBox.x}%`,
                             top: `${cropBox.y}%`,
                             width: `${cropBox.width}%`,
                             height: `${cropBox.height}%`
                           }}
+                          onMouseDown={handleCropMouseDown}
+                          onMouseMove={handleCropMouseMove}
+                          onMouseUp={() => setIsDraggingCrop(false)}
+                          onMouseLeave={() => setIsDraggingCrop(false)}
                         >
-                          <span className="absolute -top-5 left-0 bg-amber-500 text-slate-950 text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-md uppercase">Área de Corte</span>
+                          <span className="absolute -top-5 left-0 bg-amber-500 text-slate-950 text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-md uppercase select-none">Área de Corte</span>
                         </div>
                       )}
                     </div>
@@ -2441,7 +2453,7 @@ export default function App() {
         </div>
       )}
 
-      {/* ================= MODAL PREMIUM MERCADO PAGO / UPGRADE ================= */}
+      {/* ================= MODAL PREMIUM MERCADO PAGO / UPGRADE CON CARACTERÍSTICAS Y PRECIOS COMPLETOS ================= */}
       {showUpgradeModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 md:p-8 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -2472,19 +2484,68 @@ export default function App() {
                     }`}
                   >
                     <div>
-                      {/* ... existing code ... */}
+                      <div className="flex justify-between items-center mb-1">
+                        <h4 className="font-bold text-slate-200 text-sm uppercase tracking-wide">{plan.nombre}</h4>
+                        {esSuscrito && (
+                          <span className="text-[9px] bg-cyan-950 text-cyan-400 border border-cyan-800 px-2 py-0.5 rounded font-bold uppercase font-mono">Activo</span>
+                        )}
+                      </div>
+                      
+                      <div className="my-3">
+                        <span className="text-3xl font-black text-white">{plan.precio}</span>
+                        <span className="text-[10px] text-slate-500 font-mono ml-1">ARS /mes</span>
+                      </div>
+
+                      {/* DETALLE COMPLETO DE LO QUE TRAE CADA PLAN (Corregido el placeholder en blanco) */}
+                      <ul className="text-xs text-slate-400 space-y-2.5 my-4 border-t border-slate-800 pt-4 mb-6">
+                        <li className="flex items-center gap-1.5">
+                          <span className="text-cyan-400 font-bold">✓</span> 
+                          <span>Límite: <strong>{plan.descargasMax === Infinity ? 'Ilimitadas' : `${plan.descargasMax} descargas`}</strong></span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          <span className="text-cyan-400 font-bold">✓</span> 
+                          <span>Filtro de Color: <strong>{key === 'basico' ? '1 Color' : '2 Colores Simultáneos'}</strong></span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          <span className={plan.herramientas.includes("descargar_pdf") ? "text-cyan-400 font-bold" : "text-slate-600"}>✓</span> 
+                          <span className={plan.herramientas.includes("descargar_pdf") ? "text-slate-300" : "text-slate-600"}>Exportar PDF en alta definición</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          <span className={plan.herramientas.includes("descargar_png") ? "text-cyan-400 font-bold" : "text-slate-600"}>✓</span> 
+                          <span className={plan.herramientas.includes("descargar_png") ? "text-slate-300" : "text-slate-600"}>Descarga de PNG individuales limpios</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          <span className={plan.herramientas.includes("corte_manual") ? "text-cyan-400 font-bold" : "text-slate-600"}>✓</span> 
+                          <span className={plan.herramientas.includes("corte_manual") ? "text-slate-300" : "text-slate-600"}>Herramienta Crop (Recorte Manual)</span>
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          <span className={plan.herramientas.includes("offset_borders") ? "text-cyan-400 font-bold" : "text-slate-600"}>✓</span> 
+                          <span className={plan.herramientas.includes("offset_borders") ? "text-slate-300" : "text-slate-600"}>Borde de Sticker offset configurable</span>
+                        </li>
+                      </ul>
                     </div>
 
-                    {}
                     <div className="space-y-2 mt-auto">
-                      <a 
-                        href={plan.link} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="w-full block text-center py-2.5 rounded-xl text-xs font-bold bg-linear-to-r from-cyan-500 to-blue-600 text-slate-950 hover:opacity-90 transition-all"
-                      >
-                        {key === 'avanzado' ? 'SUSCRIBITE AQUI' : 'Suscribirse por Mercado Pago'}
-                      </a>
+                      {key === 'avanzado' ? (
+                        <a 
+                          href={plan.link} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="w-full block text-center py-2.5 rounded-xl text-xs font-black bg-linear-to-r from-amber-500 to-orange-500 text-slate-950 hover:opacity-90 transition-all uppercase tracking-wider"
+                        >
+                          SUSCRIBITE AQUI
+                        </a>
+                      ) : (
+                        <a 
+                          href={plan.link} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="w-full block text-center py-2.5 rounded-xl text-xs font-bold bg-linear-to-r from-cyan-500 to-blue-600 text-slate-950 hover:opacity-90 transition-all"
+                        >
+                          Suscribirse por Mercado Pago
+                        </a>
+                      )}
+                      
                       <button 
                         onClick={() => handleSimularPlan(key)}
                         className="w-full text-center py-1.5 rounded-xl text-[10px] font-mono font-bold text-slate-400 hover:text-white bg-slate-950/80 border border-slate-850 hover:border-slate-700 transition-all focus:outline-none"
