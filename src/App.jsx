@@ -4,7 +4,10 @@ import {
   getAuth, 
   signInAnonymously, 
   signInWithCustomToken, 
-  onAuthStateChanged 
+  onAuthStateChanged,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -41,10 +44,37 @@ const INITIAL_PLANCHAS = [
 ];
 
 const PLANES = {
-  libre: { nombre: "Invitado / Demo", descargasMax: 5, herramientas: ["borrar_1_color"], premium: false },
-  basico: { nombre: "Plan Básico", precio: "$2.000", descargasMax: 15, herramientas: ["borrar_1_color", "descargar_pdf"], premium: true },
-  intermedio: { nombre: "Plan Intermedio", precio: "$7.000", descargasMax: 30, herramientas: ["borrar_2_colores", "descargar_pdf", "descargar_png"], premium: true },
-  avanzado: { nombre: "Plan Avanzado", precio: "$20.000", descargasMax: Infinity, herramientas: ["borrar_2_colores", "descargar_pdf", "descargar_png", "corte_manual", "goma_borrar", "offset_borders"], premium: true }
+  libre: { 
+    nombre: "Invitado / Demo", 
+    descargasMax: 5, 
+    herramientas: ["borrar_1_color"], 
+    premium: false,
+    link: null 
+  },
+  basico: { 
+    nombre: "Plan Básico", 
+    precio: "$2.000", 
+    descargasMax: 15, 
+    herramientas: ["borrar_1_color", "descargar_pdf"], 
+    premium: true,
+    link: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=1e67e93b5d3a4cb68e7c97edacec40c3"
+  },
+  intermedio: { 
+    nombre: "Plan Intermedio", 
+    precio: "$7.000", 
+    descargasMax: 30, 
+    herramientas: ["borrar_2_colores", "descargar_pdf", "descargar_png"], 
+    premium: true,
+    link: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=ebe38c24a8384b57913478f1ecd765b8"
+  },
+  avanzado: { 
+    nombre: "Plan Avanzado", 
+    precio: "$20.000", 
+    descargasMax: Infinity, 
+    herramientas: ["borrar_2_colores", "descargar_pdf", "descargar_png", "corte_manual", "goma_borrar", "offset_borders"], 
+    premium: true,
+    link: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=54706a6b0fd340b980b056f7f4f5df93"
+  }
 };
 
 // Helper para convertir HEX a RGB en la generación del PDF
@@ -363,6 +393,35 @@ export default function App() {
     }
   }, [editingImage, bgTolerance, colorBorrar1, colorBorrar2, isColor2Enabled, bgMode, clickCoords, originalBackupUrl, isBgRemovalActive, strokeEnabled, strokeWidth, strokeColor, haloCleanup, cropEnabled, cropBox]);
 
+  const handleLoginGoogle = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (err) {
+      console.error("Error al iniciar sesión con Google: ", err);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error("Error al cerrar sesión: ", err);
+    }
+  };
+
+  const handleSimularPlan = async (planKey) => {
+    if (user) {
+      const userProfileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'subscription');
+      await setDoc(userProfileRef, { plan: planKey, descargasUsadas: 0 }, { merge: true });
+    } else {
+      setUserProfile(prev => ({ ...prev, plan: planKey }));
+      const planData = PLANES[planKey];
+      setCredits(planData.descargasMax);
+    }
+    setShowUpgradeModal(false);
+  };
+
   // Lógica de Descuento de Créditos Asíncrona (Firebase)
   const verificarYDescontarCredito = async (callbackAccion) => {
     const activePlan = PLANES[userProfile.plan || 'libre'];
@@ -549,15 +608,6 @@ export default function App() {
     };
 
     loadDemo();
-  };
-
-  const handleDownloadSinglePng = (img) => {
-    verificarYDescontarCredito(() => {
-      const link = document.createElement('a');
-      link.download = `${img.name}_clean.png`;
-      link.href = img.previewUrl;
-      link.click();
-    });
   };
 
   const recalculateLayouts = () => {
@@ -1169,19 +1219,50 @@ export default function App() {
           </div>
         </div>
         
-        {/* Métricas Generales */}
-        <div className="flex flex-wrap gap-3 items-center text-sm">
-          <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
-            <span>Créditos: <strong>{credits === Infinity ? '∞' : credits}</strong></span>
-          </div>
-          <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-violet-400"></span>
-            <span>Pliegos Master: <strong>{packedSheets.length}</strong></span>
-          </div>
-          <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-            <span>Presupuesto: <strong>{currencySymbol}{totalCostEstimate}</strong></span>
+        {/* Controles de Firebase Auth y Perfil */}
+        <div className="flex flex-wrap gap-4 items-center">
+          {user && !user.isAnonymous ? (
+            <div className="flex items-center gap-3 bg-slate-900/50 border border-slate-800 px-3.5 py-1.5 rounded-2xl">
+              {user.photoURL && (
+                <img src={user.photoURL} alt={user.displayName} className="w-7 h-7 rounded-full border border-slate-700" />
+              )}
+              <div className="text-xs">
+                <p className="font-bold text-slate-200 leading-none">{user.displayName}</p>
+                <button onClick={handleLogout} className="text-[10px] text-red-400 hover:underline mt-0.5 block leading-none">Cerrar Sesión</button>
+              </div>
+            </div>
+          ) : (
+            <button 
+              onClick={handleLoginGoogle}
+              className="bg-slate-900 hover:bg-slate-850 text-slate-200 border border-slate-800 px-4 py-2 rounded-2xl text-xs font-bold transition-all shadow-sm flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12.24 10.285V13.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.866-3.577-7.866-8s3.536-8 7.866-8c2.46 0 4.105 1.025 5.047 1.926l2.427-2.334C17.955 2.192 15.34 1 12.24 1 6.12 1 1.16 6.12 1 12.24s5.12 11.24 11.24 11.24c6.38 0 10.62-4.474 10.62-10.782 0-.728-.08-1.284-.176-1.848H12.24z"/>
+              </svg>
+              <span>Ingresar con Google</span>
+            </button>
+          )}
+
+          {/* Métricas Generales */}
+          <div className="flex flex-wrap gap-3 items-center text-sm">
+            <button 
+              onClick={() => setShowUpgradeModal(true)}
+              className="bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black px-3.5 py-1.5 rounded-xl text-xs transition-all shadow-sm shrink-0"
+            >
+              👑 {PLANES[userProfile.plan || 'libre'].nombre}
+            </button>
+            <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+              <span>Créditos: <strong>{credits === Infinity ? '∞' : credits}</strong></span>
+            </div>
+            <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-violet-400"></span>
+              <span>Pliegos Master: <strong>{packedSheets.length}</strong></span>
+            </div>
+            <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+              <span>Presupuesto: <strong>{currencySymbol}{totalCostEstimate}</strong></span>
+            </div>
           </div>
         </div>
       </header>
@@ -2232,7 +2313,7 @@ export default function App() {
                         </div>
 
                         <div>
-                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2 font-sans font-sans">Color del Contorno</span>
+                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2 font-sans">Color del Contorno</span>
                           <div className="flex gap-2 mb-3">
                             <input 
                               type="color" 
@@ -2290,7 +2371,7 @@ export default function App() {
               </div>
 
               <div className="md:col-span-2 flex flex-col gap-2 overflow-hidden justify-center items-center">
-                <span className="text-xs font-bold text-slate-500 self-start mb-1 font-sans font-sans">Previsualización del Sticker (Haz clic sobre el fondo para remover):</span>
+                <span className="text-xs font-bold text-slate-500 self-start mb-1 font-sans">Previsualización del Sticker (Haz clic sobre el fondo para remover):</span>
                 <div className="flex-1 w-full bg-slate-950 border border-slate-800 rounded-2xl relative flex items-center justify-center p-4 checkboard-pattern overflow-auto">
                   <canvas 
                     ref={previewCanvasRef} 
@@ -2350,15 +2431,91 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL DE COMPRA / UPGRADE */}
+      {/* ================= MODAL PREMIUM MERCADO PAGO / UPGRADE ================= */}
       {showUpgradeModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 text-center">
-            <h3 className="text-xl font-bold text-white mb-2 font-sans">¡Límite de descargas alcanzado!</h3>
-            <p className="text-slate-400 text-xs mb-6 font-sans">Mejora tu plan de taller para continuar planificando sin restricciones y acceder a todas las herramientas.</p>
-            <div className="flex flex-col gap-2">
-              <button onClick={() => setShowUpgradeModal(false)} className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold py-2 rounded-xl text-xs font-sans">Ver planes de suscripción</button>
-              <button onClick={() => setShowUpgradeModal(false)} className="text-slate-500 hover:text-slate-400 text-xs py-1 font-sans">Volver más tarde</button>
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 md:p-8 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h3 className="text-2xl font-black text-white tracking-tight">Ecosistema de Suscripciones Taller</h3>
+                <p className="text-slate-400 text-xs mt-1">Mejora tu plan para habilitar descargas en lote y las herramientas de edición avanzada.</p>
+              </div>
+              <button 
+                onClick={() => setShowUpgradeModal(false)}
+                className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-xl transition-all focus:outline-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {Object.keys(PLANES).filter(key => PLANES[key].premium).map((key) => {
+                const plan = PLANES[key];
+                const esSuscrito = userProfile.plan === key;
+                return (
+                  <div 
+                    key={key} 
+                    className={`border rounded-2xl p-5 flex flex-col justify-between transition-all ${
+                      esSuscrito 
+                        ? 'border-cyan-500 bg-cyan-950/5 shadow-lg shadow-cyan-500/5' 
+                        : 'border-slate-800 bg-slate-900/50 hover:border-slate-750'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <h4 className="font-extrabold text-lg text-white">{plan.nombre}</h4>
+                        {esSuscrito && (
+                          <span className="text-[9px] uppercase tracking-wider font-mono text-cyan-400 bg-cyan-950/50 border border-cyan-800 px-2 py-0.5 rounded">Activo</span>
+                        )}
+                      </div>
+                      <div className="my-3">
+                        <span className="text-3xl font-black text-white">{plan.precio}</span>
+                        <span className="text-slate-500 text-xs font-mono ml-1">/mes</span>
+                      </div>
+
+                      <ul className="space-y-2.5 text-xs text-slate-400 border-t border-slate-800/80 pt-4 mb-6 font-sans">
+                        <li className="flex items-center gap-2">
+                          <span className="text-cyan-400 font-bold">✓</span> 
+                          Límite: {plan.descargasMax === Infinity ? 'Descargas Ilimitadas' : `${plan.descargasMax} descargas`}
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="text-cyan-400 font-bold">✓</span> 
+                          {plan.herramientas.includes("borrar_2_colores") ? 'Borrado dual de color' : 'Borrado de 1 color'}
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className={plan.herramientas.includes("descargar_pdf") ? "text-cyan-400" : "text-slate-600"}>✓</span> 
+                          Exportación PDF vectorial
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className={plan.herramientas.includes("corte_manual") ? "text-cyan-400" : "text-slate-600"}>✓</span> 
+                          Herramienta de Crop manual
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className={plan.herramientas.includes("offset_borders") ? "text-cyan-400" : "text-slate-600"}>✓</span> 
+                          Borde Offset de impresión
+                        </li>
+                      </ul>
+                    </div>
+
+                    <div className="space-y-2 mt-auto">
+                      <a 
+                        href={plan.link} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="w-full block text-center py-2.5 rounded-xl text-xs font-bold bg-linear-to-r from-cyan-500 to-blue-600 text-slate-950 hover:opacity-90 transition-all"
+                      >
+                        Suscribirse por Mercado Pago
+                      </a>
+                      <button 
+                        onClick={() => handleSimularPlan(key)}
+                        className="w-full text-center py-1.5 rounded-xl text-[10px] font-mono font-bold text-slate-400 hover:text-white bg-slate-950/80 border border-slate-850 hover:border-slate-700 transition-all focus:outline-none"
+                      >
+                        ⚡ Simular Activación (Demo)
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
