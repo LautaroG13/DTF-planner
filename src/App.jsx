@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-// === CONFIGURACIÓN INICIAL VACÍA (CON UNA PLANTILLA LIMPIA) ===
+// === CONFIGURACIÓN INICIAL DE PLANTILLAS PEQUEÑAS (SUB-TEMPLATES) ===
 const INITIAL_PLANCHAS = [
-  { id: 'p1', name: 'Plancha Cliente 1 (14x20 cm)', width: 140, height: 200, spacing: 3, safeMargin: 5, color: '#3B82F6' }
+  { id: 'p1', name: 'Plancha Argentina (14x20 cm)', width: 140, height: 200, spacing: 3, safeMargin: 5, color: '#3B82F6' },
+  { id: 'p2', name: 'Logos Club (12x10 cm)', width: 120, height: 100, spacing: 3, safeMargin: 5, color: '#8B5CF6' },
+  { id: 'p3', name: 'Etiquetas Regalo (15x15 cm)', width: 150, height: 150, spacing: 3, safeMargin: 5, color: '#10B981' }
 ];
 
 // Helper para convertir HEX a RGB en la generación del PDF
@@ -42,9 +44,7 @@ function trimTransparentCanvas(canvas, alphaThreshold = 10) {
     }
   }
 
-  if (!foundPixel) {
-    return canvas; 
-  }
+  if (!foundPixel) return canvas; 
 
   minX = Math.max(0, minX - 1);
   minY = Math.max(0, minY - 1);
@@ -211,10 +211,8 @@ export default function App() {
   const [masterWidth, setMasterWidth] = useState(580);
   const [masterHeight, setMasterHeight] = useState(1000);
   
-  // === INICIO SIN DATOS PRELLENADOS ===
   const [planchas, setPlanchas] = useState(INITIAL_PLANCHAS);
   const [selectedPlanchaForUpload, setSelectedPlanchaForUpload] = useState('p1');
-  const [images, setImages] = useState([]);
   
   const [newPlanchaName, setNewPlanchaName] = useState('');
   const [newPlanchaWidth, setNewPlanchaWidth] = useState(14);
@@ -223,6 +221,8 @@ export default function App() {
   const [newPlanchaSafeMargin, setNewPlanchaSafeMargin] = useState(5);
   const [newPlanchaColor, setNewPlanchaColor] = useState('#EC4899');
 
+  const [images, setImages] = useState([]);
+  
   const [pricePerMeter, setPricePerMeter] = useState(12000); 
   const [currencySymbol, setCurrencySymbol] = useState('$');
   const [showCutMarks, setShowCutMarks] = useState(true);
@@ -240,16 +240,10 @@ export default function App() {
   const [pdfProgress, setPdfProgress] = useState('');
   const [isDragging, setIsDragging] = useState(false);
 
-  // === ESTADOS PARA EL TUTORIAL INTERACTIVO ===
-  const [tutorialStep, setTutorialStep] = useState(() => {
-    const saved = localStorage.getItem('dtf_tutorial_completed');
-    return saved ? 0 : 1; // Si no está completado, empieza en el paso 1
-  });
-
-  // Estados del Editor de Stickers (Quitar fondo, Bordes y Goma)
+  // Estados del Editor de Stickers (Quitar fondo y Bordes)
   const [editingImage, setEditingImage] = useState(null); 
-  const [activeTab, setActiveTab] = useState('bg'); // 'bg', 'stroke', o 'eraser'
-  const [bgMode, setBgMode] = useState('contiguous'); 
+  const [activeTab, setActiveTab] = useState('bg'); 
+  const [bgMode, setBgMode] = useState('contiguous');
   const [clickCoords, setClickCoords] = useState({ x: 0, y: 0 }); 
   const [isBgRemovalActive, setIsBgRemovalActive] = useState(false);
   const [bgTolerance, setBgTolerance] = useState(15); 
@@ -262,14 +256,8 @@ export default function App() {
   const [removalPreviewUrl, setRemovalPreviewUrl] = useState('');
   const [originalBackupUrl, setOriginalBackupUrl] = useState(''); 
   
-  // === ESTADOS DE LA GOMA DE BORRAR MANUAL ===
-  const [eraserSize, setEraserSize] = useState(30); // px de diámetro
-  const [isDrawingEraser, setIsDrawingEraser] = useState(false);
-  const [eraserMaskUrl, setEraserMaskUrl] = useState(''); // Guarda los trazos acumulados
-  
   const fileInputRef = useRef(null);
   const previewCanvasRef = useRef(null);
-  const eraserCanvasRef = useRef(null); // Canvas oculto para acumular los trazos borrados
 
   useEffect(() => {
     const script = document.createElement('script');
@@ -291,7 +279,7 @@ export default function App() {
     if (editingImage && originalBackupUrl) {
       applyImageEdits();
     }
-  }, [editingImage, bgTolerance, targetBgColor, bgMode, clickCoords, originalBackupUrl, isBgRemovalActive, strokeEnabled, strokeWidth, strokeColor, haloCleanup, eraserMaskUrl]);
+  }, [editingImage, bgTolerance, targetBgColor, bgMode, clickCoords, originalBackupUrl, isBgRemovalActive, strokeEnabled, strokeWidth, strokeColor, haloCleanup]);
 
   const handleAddPlancha = (e) => {
     e.preventDefault();
@@ -309,7 +297,6 @@ export default function App() {
     setPlanchas(prev => [...prev, newPlancha]);
     setSelectedPlanchaForUpload(planchaId);
     setNewPlanchaName('');
-    if (tutorialStep === 2) setTutorialStep(3); // Avanzar tutorial
   };
 
   const handleRemovePlancha = (id) => {
@@ -364,11 +351,9 @@ export default function App() {
             bgMode: 'contiguous',
             strokeEnabled: false,
             strokeWidth: 2,
-            strokeColor: '#ffffff',
-            eraserMaskUrl: '' // Guarda los trazos de borrado
+            strokeColor: '#ffffff'
           };
           setImages(prev => [...prev, newImg]);
-          if (tutorialStep === 3) setTutorialStep(4); // Avanzar tutorial
         };
         img.src = event.target.result;
       };
@@ -405,11 +390,11 @@ export default function App() {
     }));
   };
 
-  // Carga de Demo modificada para que sea opcional e interactiva
   const loadDemoData = () => {
     const demoItems = [
-      { name: 'Escudo Argentina', planchaId: 'p1', svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="#ffffff"/><path d="M15,20 L85,20 L75,70 L50,90 L25,70 Z" fill="#F59E0B" stroke="#000" stroke-width="3"/><path d="M30,35 L70,35 M30,50 L70,50" fill="none" stroke="#fff" stroke-width="4"/></svg>` },
-      { name: 'Sol de Mayo', planchaId: 'p1', svg: `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg"><rect width="160" height="160" fill="none"/><path d="M80,30 L85,55 L110,60 L85,65 L80,90 L75,65 L50,60 L75,55 Z" fill="#F59E0B" stroke="#000" stroke-width="2"/><circle cx="80" cy="60" r="10" fill="#EC4899"/></svg>` }
+      { name: 'Sol Argentina (Padding)', planchaId: 'p1', svg: `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg"><rect width="160" height="160" fill="none"/><path d="M80,30 L85,55 L110,60 L85,65 L80,90 L75,65 L50,60 L75,55 Z" fill="#F59E0B" stroke="#000" stroke-width="2"/><circle cx="80" cy="60" r="10" fill="#EC4899"/></svg>` },
+      { name: 'Escudo AFA', planchaId: 'p1', svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="#ffffff"/><path d="M15,20 L85,20 L75,70 L50,90 L25,70 Z" fill="#F59E0B" stroke="#000" stroke-width="3"/><path d="M30,35 L70,35 M30,50 L70,50" fill="none" stroke="#fff" stroke-width="4"/></svg>` },
+      { name: 'Cyber Cat', planchaId: 'p2', svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="#ffffff"/><path d="M15,30 L30,50 L70,50 L85,30 L75,75 L25,75 Z" fill="#10B981" stroke="#000" stroke-width="3"/><circle cx="35" cy="58" r="6" fill="#fff"/><circle cx="65" cy="58" r="6" fill="#fff"/></svg>` }
     ];
 
     const loadDemo = async () => {
@@ -424,7 +409,7 @@ export default function App() {
           aspectRatio: 1,
           originalWidth: 500,
           originalHeight: 500,
-          planchaId: selectedPlanchaForUpload,
+          planchaId: item.planchaId,
           quantity: 1,
           sizingMode: 'max',
           targetSize: 40,
@@ -435,12 +420,10 @@ export default function App() {
           bgMode: 'contiguous',
           strokeEnabled: false,
           strokeWidth: 2,
-          strokeColor: '#ffffff',
-          eraserMaskUrl: ''
+          strokeColor: '#ffffff'
         };
       });
       setImages(prev => [...prev, ...parsedImages]);
-      if (tutorialStep === 3) setTutorialStep(4);
     };
 
     loadDemo();
@@ -619,11 +602,10 @@ export default function App() {
       }, 150);
 
     } catch (error) {
-      console.error(error);
+      console.error("Error generando PDF: ", error);
     } finally {
       setIsGeneratingPdf(false);
       setPdfProgress('');
-      if (tutorialStep === 5) setTutorialStep(0); // Terminar tutorial con éxito
     }
   };
 
@@ -641,31 +623,9 @@ export default function App() {
     setStrokeColor(img.strokeColor || '#ffffff');
     setRemovalPreviewUrl(img.previewUrl);
     setEditedAspectRatio(img.aspectRatio || 1);
-    setEraserMaskUrl(img.eraserMaskUrl || ''); 
     setActiveTab('bg');
-
-    // Inicializar el canvas de borrado persistente con el tamaño original de la imagen
-    setTimeout(() => {
-      const eCanvas = eraserCanvasRef.current;
-      if (eCanvas) {
-        eCanvas.width = img.originalWidth || 500;
-        eCanvas.height = img.originalHeight || 500;
-        const eCtx = eCanvas.getContext('2d');
-        eCtx.clearRect(0, 0, eCanvas.width, eCanvas.height);
-        
-        // Si ya tenía trazos de borrado guardados, cargarlos de nuevo
-        if (img.eraserMaskUrl) {
-          const mImg = new Image();
-          mImg.onload = () => {
-            eCtx.drawImage(mImg, 0, 0);
-          };
-          mImg.src = img.eraserMaskUrl;
-        }
-      }
-    }, 100);
   };
 
-  // === MOTOR DE FILTRO CORREGIDO CON GOMA DE BORRAR INTEGRADA ===
   const applyImageEdits = () => {
     const tempImg = new Image();
     tempImg.crossOrigin = "anonymous";
@@ -683,13 +643,12 @@ export default function App() {
       const width = procCanvas.width;
       const height = procCanvas.height;
 
-      // 1. Procesar Remoción de fondo si está activa
       if (isBgRemovalActive) {
         const imgData = procCtx.getImageData(0, 0, width, height);
         const data = imgData.data;
         const { r: targetR, g: targetG, b: targetB } = targetBgColor;
         
-        const threshold = (bgTolerance / 100) * 220;
+        const threshold = (bgTolerance / 100) * 442;
         const removedMask = new Uint8Array(width * height);
 
         if (bgMode === 'contiguous') {
@@ -766,71 +725,50 @@ export default function App() {
           }
         }
 
-        // Limpieza de Halo / Anti-Alias
-        if (haloCleanup > 0) {
-          const tempMask = new Uint8Array(removedMask);
-          const radius = Math.min(5, haloCleanup); 
-
-          for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-              const idx = y * width + x;
-              if (tempMask[idx] === 1) continue; 
-
-              let nearRemoved = false;
-              for (let dy = -radius; dy <= radius; dy++) {
-                const ny = y + dy;
-                if (ny < 0 || ny >= height) continue;
-                for (let dx = -radius; dx <= radius; dx++) {
-                  if (dx * dx + dy * dy > radius * radius) continue; 
-                  const nx = x + dx;
-                  if (nx < 0 || nx >= width) continue;
-                  
-                  if (tempMask[ny * width + nx] === 1) {
-                    nearRemoved = true;
-                    break;
-                  }
-                }
-                if (nearRemoved) break;
-              }
-
-              if (nearRemoved) {
-                const dataIdx = idx * 4;
-                const r = data[dataIdx];
-                const g = data[dataIdx + 1];
-                const b = data[dataIdx + 2];
-                const a = data[dataIdx + 3];
-
-                const distance = Math.sqrt(
-                  Math.pow(r - targetR, 2) +
-                  Math.pow(g - targetG, 2) +
-                  Math.pow(b - targetB, 2)
-                );
-
-                if (distance < threshold * 2.2) {
-                  const fadeFactor = Math.max(0, (distance / (threshold * 2.2)));
-                  data[dataIdx + 3] = Math.floor(a * fadeFactor * 0.4); 
-                }
-              }
-            }
-          }
-        }
-
         for (let i = 0; i < width * height; i++) {
           if (removedMask[i] === 1) {
             data[i * 4 + 3] = 0;
           }
         }
 
-        procCtx.putImageData(imgData, 0, 0);
-      }
+        if (haloCleanup > 0) {
+          const originalAlpha = new Uint8Array(width * height);
+          for (let i = 0; i < width * height; i++) {
+            originalAlpha[i] = data[i * 4 + 3];
+          }
 
-      // === 2. APLICAR GOMA DE BORRAR MANUAL (DESTRUCCIÓN ABSOLUTA DE PÍXELES DE RESIDUO) ===
-      const eCanvas = eraserCanvasRef.current;
-      if (eCanvas) {
-        // Usar destination-out para cortar directamente la máscara pintada sobre la imagen procesada
-        procCtx.globalCompositeOperation = 'destination-out';
-        procCtx.drawImage(eCanvas, 0, 0);
-        procCtx.globalCompositeOperation = 'source-over';
+          const radius = Math.min(5, haloCleanup);
+
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              const idx = y * width + x;
+              if (originalAlpha[idx] === 0) continue;
+
+              let minAlphaInNeighborhood = 255;
+
+              for (let dy = -radius; dy <= radius; dy++) {
+                const ny = y + dy;
+                if (ny >= 0 && ny < height) {
+                  for (let dx = -radius; dx <= radius; dx++) {
+                    if (dx*dx + dy*dy <= radius*radius) {
+                      const nx = x + dx;
+                      if (nx >= 0 && nx < width) {
+                        const nIdx = ny * width + nx;
+                        if (originalAlpha[nIdx] < minAlphaInNeighborhood) {
+                          minAlphaInNeighborhood = originalAlpha[nIdx];
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              data[idx * 4 + 3] = minAlphaInNeighborhood;
+            }
+          }
+        }
+
+        procCtx.putImageData(imgData, 0, 0);
       }
       
       let strokePx = 0;
@@ -879,7 +817,6 @@ export default function App() {
   };
 
   const handleCanvasClick = (e) => {
-    if (activeTab === 'eraser') return; // Si está activa la goma, no remueve color por clic
     const canvas = previewCanvasRef.current;
     if (!canvas) return;
     
@@ -895,51 +832,6 @@ export default function App() {
     setTargetBgColor({ r: pixel[0], g: pixel[1], b: pixel[2] });
     setClickCoords({ x, y });
     setIsBgRemovalActive(true);
-  };
-
-  // === EVENTOS DEL RATÓN PARA PINTAR CON LA GOMA DE BORRAR ===
-  const handleEraserMouseDown = (e) => {
-    if (activeTab !== 'eraser') return;
-    setIsDrawingEraser(true);
-    drawEraserStroke(e);
-  };
-
-  const handleEraserMouseMove = (e) => {
-    if (!isDrawingEraser || activeTab !== 'eraser') return;
-    drawEraserStroke(e);
-  };
-
-  const handleEraserMouseUp = () => {
-    if (!isDrawingEraser) return;
-    setIsDrawingEraser(false);
-    
-    // Guardar trazos en la máscara actual para actualizar el buffer
-    const eCanvas = eraserCanvasRef.current;
-    if (eCanvas) {
-      setEraserMaskUrl(eCanvas.toDataURL('image/png'));
-    }
-  };
-
-  const drawEraserStroke = (e) => {
-    const eCanvas = eraserCanvasRef.current;
-    if (!eCanvas) return;
-    const eCtx = eCanvas.getContext('2d');
-
-    // Mapear coordenadas de la pantalla a las medidas físicas originales del lienzo
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * eCanvas.width;
-    const y = ((e.clientY - rect.top) / rect.height) * eCanvas.height;
-
-    eCtx.fillStyle = 'rgba(0,0,0,1)'; // El color es lo de menos, lo que importa es pintar pixeles para destination-out
-    eCtx.beginPath();
-    // Escalar tamaño de goma visual a pixels reales de imagen
-    const strokeScaleFactor = eCanvas.width / rect.width;
-    const actualBrushSize = eraserSize * strokeScaleFactor;
-    eCtx.arc(x, y, actualBrushSize / 2, 0, Math.PI * 2);
-    eCtx.fill();
-    
-    // Forzar re-render en tiempo real
-    applyImageEdits();
   };
 
   const saveTransparentImage = () => {
@@ -971,14 +863,12 @@ export default function App() {
             bgMode,
             strokeEnabled,
             strokeWidth,
-            strokeColor,
-            eraserMaskUrl: eraserMaskUrl // Guardamos los trazos borrados
+            strokeColor
           };
         }
         return img;
       }));
       setEditingImage(null);
-      if (tutorialStep === 4) setTutorialStep(5); // Avanzar tutorial
     };
     tempImg.src = removalPreviewUrl;
   };
@@ -1005,8 +895,7 @@ export default function App() {
             previewUrl: trimmedUrl,
             aspectRatio: newAspect,
             isBgRemovalActive: false,
-            strokeEnabled: false,
-            eraserMaskUrl: '' // Borramos la máscara de la goma
+            strokeEnabled: false
           };
         }
         return img;
@@ -1014,11 +903,6 @@ export default function App() {
       setEditingImage(null);
     };
     tempImg.src = originalBackupUrl;
-  };
-
-  const completeTutorial = () => {
-    setTutorialStep(0);
-    localStorage.setItem('dtf_tutorial_completed', 'true');
   };
 
   const activeSheet = packedSheets[activeSheetIndex];
@@ -1034,122 +918,18 @@ export default function App() {
   const scale = (zoomLevel / 100) * 0.85;
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans antialiased flex flex-col relative">
+    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans antialiased flex flex-col">
       
-      {/* ================= BURBUJAS / GUIAS DEL TUTORIAL INTERACTIVO ================= */}
-      {tutorialStep > 0 && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700/60 p-6 rounded-3xl max-w-md w-full shadow-2xl relative animate-fade-in text-xs">
-            <button 
-              onClick={completeTutorial}
-              className="absolute top-4 right-4 text-slate-500 hover:text-slate-200 text-sm font-bold"
-            >
-              Omitir tutorial ✕
-            </button>
-
-            {tutorialStep === 1 && (
-              <div className="flex flex-col gap-4">
-                <div className="text-3xl text-cyan-400">👋 ¡Te damos la bienvenida!</div>
-                <h3 className="text-sm font-black text-white uppercase tracking-wider">Planificador Inteligente DTF UV</h3>
-                <p className="text-slate-400 leading-relaxed">
-                  Esta herramienta te ayudará a optimizar tus planchas en bobinas de 58cm de forma automatizada. Acomoda los stickers por clientes, quita fondos molestos e imprime en la más alta calidad de pliego.
-                </p>
-                <button 
-                  onClick={() => setTutorialStep(2)}
-                  className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-extrabold rounded-xl transition-all"
-                >
-                  Comenzar recorrido (1 minuto) ➜
-                </button>
-              </div>
-            )}
-
-            {tutorialStep === 2 && (
-              <div className="flex flex-col gap-4">
-                <div className="text-3xl text-violet-400">📁 Paso 1: Crea una Plantilla de Cliente</div>
-                <p className="text-slate-400 leading-relaxed">
-                  En la barra lateral izquierda, ve a la sección <strong>"2. Configuración de Plantillas Chicas"</strong>. Introduce las medidas que te pidió tu cliente (ej: <span className="font-mono text-white">14x20 cm</span>) y pulsa en "Crear Plantilla".
-                </p>
-                <div className="border border-violet-850 bg-violet-950/20 p-3 rounded-xl text-violet-300 font-medium italic">
-                  💡 Crearemos una bandeja única para que los stickers de cada cliente queden agrupados y sea fácil cortarlos después.
-                </div>
-                <button 
-                  onClick={() => {
-                    setIsPlanchasManagerOpen(true);
-                    setTutorialStep(3);
-                  }}
-                  className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 text-white font-extrabold rounded-xl transition-all"
-                >
-                  Entendido, ¡crear plantilla! ➜
-                </button>
-              </div>
-            )}
-
-            {tutorialStep === 3 && (
-              <div className="flex flex-col gap-4">
-                <div className="text-3xl text-emerald-400">🖼️ Paso 2: Sube los Stickers</div>
-                <p className="text-slate-400 leading-relaxed">
-                  En la sección <strong>"3. Subir Imágenes"</strong>, selecciona tu plantilla de destino, arrastra tus archivos PNG/JPG o pulsa en <strong>"💡 Cargar Demo"</strong> si quieres probar con nuestros diseños vectoriales integrados.
-                </p>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={loadDemoData}
-                    className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold rounded-xl transition-all"
-                  >
-                    💡 Cargar Diseños Demo
-                  </button>
-                  <button 
-                    onClick={() => setTutorialStep(4)}
-                    className="py-2 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all"
-                  >
-                    Ya los subí ➜
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {tutorialStep === 4 && (
-              <div className="flex flex-col gap-4">
-                <div className="text-3xl text-amber-400">🎨 Paso 3: Quita Fondos y Ajusta Contornos</div>
-                <p className="text-slate-400 leading-relaxed">
-                  Al lado de cada imagen subida en tu lista, pulsa en el botón <strong>"🎨 Editar"</strong>. Se abrirá el editor avanzado donde podrás usar la <strong>Varita Mágica</strong> para eliminar fondos, la <strong>Goma</strong> para borrar motas residuales o activar el **Contorno Offset** milimétrico.
-                </p>
-                <button 
-                  onClick={() => setTutorialStep(5)}
-                  className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-white font-extrabold rounded-xl transition-all"
-                >
-                  Siguiente Paso ➜
-                </button>
-              </div>
-            )}
-
-            {tutorialStep === 5 && (
-              <div className="flex flex-col gap-4">
-                <div className="text-3xl text-cyan-400">🚀 Paso 4: Visualiza y Exporta tu PDF</div>
-                <p className="text-slate-400 leading-relaxed">
-                  ¡Y listo! Tu lienzo se actualizará automáticamente acomodando las plantillas de tus clientes unas al lado de otras dentro del rollo de impresión de 58cm. Utiliza el <strong>Giro Visual</strong> para verlo de forma panorámica y descarga tu PDF escala 1:1 listo para imprimir.
-                </p>
-                <button 
-                  onClick={completeTutorial}
-                  className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-extrabold rounded-xl transition-all"
-                >
-                  🏁 ¡Empezar a Diseñar!
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* HEADER DE LA APP */}
       <header className="bg-slate-950 border-b border-slate-800 px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
-          <div className="bg-gradient-to-tr from-violet-600 to-cyan-500 p-2.5 rounded-xl shadow-inner animate-pulse">
+          <div className="bg-linear-to-tr from-violet-600 to-cyan-500 p-2.5 rounded-xl shadow-inner animate-pulse">
             <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </div>
           <div>
-            <h1 className="text-xl font-black tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
+            <h1 className="text-xl font-black tracking-tight bg-linear-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
               Smart DTF UV Pro Layout
             </h1>
             <p className="text-xs text-slate-400 font-medium">Anidamiento Jerárquico de Planillas en Bobina de Impresión</p>
@@ -1158,12 +938,6 @@ export default function App() {
         
         {/* Métricas Generales */}
         <div className="flex flex-wrap gap-3 items-center text-sm">
-          <button 
-            onClick={() => setTutorialStep(1)}
-            className="bg-slate-900 border border-cyan-800 text-cyan-400 hover:bg-slate-850 px-3 py-1.5 rounded-lg text-xs font-bold transition-all focus:outline-none"
-          >
-            ❓ Ayuda / Tutorial
-          </button>
           <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
             <span>Pliegos Rollo Master: <strong>{packedSheets.length}</strong></span>
@@ -1183,7 +957,7 @@ export default function App() {
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         
         {/* PANEL IZQUIERDO DE ACCIONES CON SECCIONES COLAPSABLES */}
-        <aside className="w-full lg:w-[420px] bg-slate-950 border-r border-slate-800 flex flex-col overflow-y-auto max-h-[calc(100vh-80px)] shrink-0">
+        <aside className="w-full lg:w-105 bg-slate-950 border-r border-slate-800 flex flex-col overflow-y-auto max-h-[calc(100vh-80px)] shrink-0">
           
           <div className="p-4 flex flex-col gap-4">
 
@@ -1203,7 +977,6 @@ export default function App() {
               {isConfigOpen && (
                 <div className="p-4 border-t border-slate-800/60 flex flex-col gap-3 text-xs bg-slate-900/20">
                   
-                  {/* Selector de Largo del Rollo Maestro */}
                   <div>
                     <span className="text-slate-400 block mb-1.5 font-bold">Tamaño del Rollo Maestro (Bobina)</span>
                     <div className="grid grid-cols-2 gap-2">
@@ -1280,7 +1053,6 @@ export default function App() {
               {isPlanchasManagerOpen && (
                 <div className="p-4 border-t border-slate-800/60 bg-slate-900/20 flex flex-col gap-4">
                   
-                  {/* Lista de Plantillas chicas actuales */}
                   <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
                     {planchas.map(plancha => (
                       <div 
@@ -1309,7 +1081,6 @@ export default function App() {
                     ))}
                   </div>
 
-                  {/* Formulario de nueva plantilla chica */}
                   <form onSubmit={handleAddPlancha} className="border-t border-slate-800/60 pt-3 flex flex-col gap-2.5">
                     <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Crear nueva plantilla interna</span>
                     
@@ -1463,7 +1234,7 @@ export default function App() {
               </button>
 
               {isImagesListOpen && (
-                <div className="p-3 border-t border-slate-800/60 bg-slate-900/10 flex flex-col gap-2 max-h-[350px] overflow-y-auto">
+                <div className="p-3 border-t border-slate-800/60 bg-slate-900/10 flex flex-col gap-2 max-h-87.5 overflow-y-auto">
                   {images.length === 0 ? (
                     <div className="text-xs text-slate-500 text-center py-6 italic">No hay imágenes. Sube tus diseños y asígnalos a tu plantilla chica.</div>
                   ) : (
@@ -1472,9 +1243,8 @@ export default function App() {
                       return (
                         <div 
                           key={img.id}
-                          className="bg-slate-950 border border-slate-855 rounded-xl p-2.5 flex gap-2.5 relative hover:border-slate-750 transition-all"
+                          className="bg-slate-950 border border-slate-850 rounded-xl p-2.5 flex gap-2.5 relative hover:border-slate-750 transition-all"
                         >
-                          {/* Miniatura */}
                           <div className="w-12 h-12 bg-slate-900 rounded-lg p-0.5 flex items-center justify-center border border-slate-800 shrink-0 relative overflow-hidden checkboard-pattern">
                             <img src={img.previewUrl} alt={img.name} className="max-w-full max-h-full object-contain" />
                             <span 
@@ -1483,7 +1253,6 @@ export default function App() {
                             ></span>
                           </div>
 
-                          {/* Info y Controles */}
                           <div className="flex-1 flex flex-col gap-1 min-w-0 text-xs">
                             <div className="flex justify-between items-start gap-1">
                               <h4 className="font-bold text-slate-200 truncate pr-4 text-[11px]">{img.name}</h4>
@@ -1495,7 +1264,6 @@ export default function App() {
                               </button>
                             </div>
 
-                            {/* Selector de Plancha Destino */}
                             <div className="flex items-center gap-1 text-[10px]">
                               <span className="text-slate-500">Plantilla:</span>
                               <select 
@@ -1509,9 +1277,7 @@ export default function App() {
                               </select>
                             </div>
 
-                            {/* Controles de Copias y Medidas */}
                             <div className="flex items-center justify-between gap-1.5 mt-1.5">
-                              {/* Copias */}
                               <div className="flex items-center gap-1.5 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-850">
                                 <button 
                                   onClick={() => updateImageProperty(img.id, 'quantity', Math.max(1, (img.quantity || 1) - 1))}
@@ -1528,7 +1294,6 @@ export default function App() {
                                 </button>
                               </div>
 
-                              {/* Medida Individual */}
                               <div className="flex items-center gap-1">
                                 <input 
                                   type="number" 
@@ -1542,7 +1307,6 @@ export default function App() {
                                 <span className="text-[10px] text-slate-500">cm</span>
                               </div>
 
-                              {/* Editar Fondo */}
                               <button
                                 onClick={() => openBackgroundRemovalModal(img)}
                                 className="text-[10px] text-cyan-400 hover:text-cyan-350 font-bold flex items-center gap-0.5 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/40 transition-colors focus:outline-none"
@@ -1569,7 +1333,6 @@ export default function App() {
           {/* BARRA DE ACCIONES DE LA PLANCHA */}
           <div className="bg-slate-950 border border-slate-800 p-3 rounded-2xl flex flex-col lg:flex-row justify-between items-center gap-3 shadow-md">
             
-            {/* Opciones de Orientación de la Bobina en Pantalla */}
             <div className="flex items-center gap-2 text-xs">
               <span className="font-bold text-slate-400">Giro Visual:</span>
               <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
@@ -1594,7 +1357,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Selector de Pliego de Rollo Master en previsualización */}
             <div className="text-xs">
               <span className="font-bold text-slate-400">Ver Pliego Master: </span>
               {packedSheets.length === 0 ? (
@@ -1614,16 +1376,15 @@ export default function App() {
               )}
             </div>
 
-            {/* Descarga de PDF Directa en macOS */}
             <button 
               onClick={generatePDF}
               disabled={packedSheets.length === 0 || isGeneratingPdf}
-              className={`px-5 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 shadow-lg transition-all focus:outline-none ${
+              className={`px-6 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all focus:outline-none ${
                 packedSheets.length === 0 
                   ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50' 
                   : isGeneratingPdf 
                     ? 'bg-cyan-700 text-slate-200 cursor-wait' 
-                    : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white transform active:scale-95'
+                    : 'bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white transform active:scale-95'
               }`}
             >
               {isGeneratingPdf ? (
@@ -1645,10 +1406,9 @@ export default function App() {
             </button>
           </div>
 
-          {/* MENSAJES DE ESTADO DE COMPILACIÓN PDF */}
           {isGeneratingPdf && (
-            <div className="absolute inset-0 bg-slate-950/80 z-50 flex flex-col items-center justify-center gap-4 rounded-2xl backdrop-blur-sm animate-fade-in text-xs">
-              <div className="bg-gradient-to-tr from-cyan-500 to-blue-600 p-4 rounded-full shadow-lg">
+            <div className="absolute inset-0 bg-slate-950/80 z-50 flex flex-col items-center justify-center gap-4 rounded-2xl backdrop-blur-xs">
+              <div className="bg-linear-to-tr from-cyan-500 to-blue-600 p-4 rounded-full shadow-lg">
                 <svg className="animate-spin h-8 w-8 text-white" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -1682,7 +1442,6 @@ export default function App() {
                 <span className="text-slate-500">Ninguna plantilla interna con stickers ha sido agregada para el armado.</span>
               )}
 
-              {/* Control de Zoom */}
               <div className="flex items-center gap-2.5">
                 <span className="text-slate-400">Zoom:</span>
                 <input 
@@ -1697,7 +1456,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* El Rollo de Film DTF UV */}
             <div className="flex-1 overflow-auto flex justify-center items-center bg-slate-900/60 rounded-xl border border-slate-800 p-6 relative">
               {activeSheet ? (
                 <div 
@@ -1710,7 +1468,6 @@ export default function App() {
                   }}
                 >
                   
-                  {/* REGLAS MILIMÉTRICAS INTELIGENTES */}
                   {isRotated ? (
                     <div className="absolute top-0 -left-10 bottom-0 w-8 border-r border-slate-800 flex flex-col justify-between text-[9px] text-slate-500 select-none pr-1.5 font-mono text-right">
                       {Array.from({ length: Math.floor(activePlanchaWidth / 100) + 1 }).map((_, i) => (
@@ -1741,7 +1498,6 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* Límite Seguro de Impresión */}
                   <div 
                     className="absolute border border-dashed border-red-500/40 pointer-events-none rounded animate-pulse"
                     style={{
@@ -1756,7 +1512,6 @@ export default function App() {
                     </span>
                   </div>
 
-                  {/* RENDERIZAR LAS PLANTILLAS CHICAS DE TRABAJO */}
                   {activeSheet.packedPlanchas.map((plancha) => {
                     const pLeft = isRotated ? plancha.y * scale : plancha.x * scale;
                     const pTop = isRotated ? plancha.x * scale : plancha.y * scale;
@@ -1789,7 +1544,7 @@ export default function App() {
                         </div>
 
                         <div 
-                          className="absolute text-[8px] font-black px-1.5 py-0.5 rounded text-white pointer-events-none z-10 truncate max-w-[150px] shadow-md"
+                          className="absolute text-[8px] font-black px-1.5 py-0.5 rounded text-white pointer-events-none z-10 truncate max-w-37.5 shadow-md"
                           style={{ 
                             backgroundColor: plancha.color,
                             left: `${pLeft + 6}px`,
@@ -1802,7 +1557,6 @@ export default function App() {
                     );
                   })}
 
-                  {/* STICKERS ACOMODADOS */}
                   {activeSheet.packedPlanchas.flatMap(p => p.packedStickers).map((item) => {
                     const leftPos = isRotated ? item.globalY * scale : item.globalX * scale;
                     const topPos = isRotated ? item.globalX * scale : item.globalY * scale;
@@ -1823,7 +1577,7 @@ export default function App() {
                         onMouseLeave={() => setHoveredSticker(null)}
                       >
                         <div 
-                          className="w-full h-full p-[1px] rounded transition-all group-hover:scale-105 group-hover:shadow-lg relative overflow-hidden flex items-center justify-center checkboard-pattern"
+                          className="w-full h-full p-px rounded transition-all group-hover:scale-105 group-hover:shadow-lg relative overflow-hidden flex items-center justify-center checkboard-pattern"
                           style={{
                             border: `1.5px solid #22d3ee40`,
                             backgroundColor: 'rgba(30, 41, 59, 0.05)'
@@ -1850,7 +1604,6 @@ export default function App() {
                     );
                   })}
 
-                  {/* Highlight del Hover */}
                   {hoveredSticker && (
                     <div 
                       className="absolute bg-transparent border-2 border-dashed pointer-events-none z-30"
@@ -1880,7 +1633,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Barra Inferior */}
             {activeSheet && (
               <div className="mt-3 flex flex-wrap justify-between items-center text-xs text-slate-400 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
                 <div className="flex gap-4">
@@ -1899,18 +1651,17 @@ export default function App() {
         </main>
       </div>
 
-      {/* ================= MODAL DE EDICIÓN AVANZADA (REMOVEDOR, BORDES Y GOMA) ================= */}
+      {/* ================= MODAL DE EDICIÓN AVANZADA (REMOVEDOR Y BORDES) ================= */}
       {editingImage && (
-        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-4xl flex flex-col max-h-[90vh]">
             
-            {/* Header del Modal */}
             <div className="flex justify-between items-center pb-4 border-b border-slate-800 mb-2">
               <div>
                 <h3 className="text-lg font-black text-white flex items-center gap-2">
                   <span>🎨</span> Editor Avanzado de Stickers
                 </h3>
-                <p className="text-xs text-slate-400 font-medium">Personaliza la transparencia del fondo y el contorno físico de tu sticker</p>
+                <p className="text-xs text-slate-400">Personaliza la transparencia del fondo y el contorno físico de tu sticker</p>
               </div>
               <button 
                 onClick={() => setEditingImage(null)}
@@ -1920,11 +1671,10 @@ export default function App() {
               </button>
             </div>
 
-            {/* Selector de Pestañas */}
-            <div className="flex border-b border-slate-800 mb-4 text-xs">
+            <div className="flex border-b border-slate-800 mb-4">
               <button
                 onClick={() => setActiveTab('bg')}
-                className={`py-2.5 px-4 font-bold border-b-2 transition-all flex items-center gap-2 focus:outline-none ${
+                className={`py-2.5 px-4 text-xs font-bold border-b-2 transition-all flex items-center gap-2 focus:outline-none ${
                   activeTab === 'bg'
                     ? 'border-cyan-500 text-cyan-400 bg-slate-950/10'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -1933,18 +1683,8 @@ export default function App() {
                 <span>🪄</span> Quitar Fondo
               </button>
               <button
-                onClick={() => setActiveTab('eraser')}
-                className={`py-2.5 px-4 font-bold border-b-2 transition-all flex items-center gap-2 focus:outline-none ${
-                  activeTab === 'eraser'
-                    ? 'border-cyan-500 text-cyan-400 bg-slate-950/10'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <span>🧼</span> Goma de Borrar (Manual)
-              </button>
-              <button
                 onClick={() => setActiveTab('stroke')}
-                className={`py-2.5 px-4 font-bold border-b-2 transition-all flex items-center gap-2 focus:outline-none ${
+                className={`py-2.5 px-4 text-xs font-bold border-b-2 transition-all flex items-center gap-2 focus:outline-none ${
                   activeTab === 'stroke'
                     ? 'border-cyan-500 text-cyan-400 bg-slate-950/10'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -1954,16 +1694,12 @@ export default function App() {
               </button>
             </div>
 
-            {/* Contenido del Editor */}
             <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-hidden">
               
-              {/* Columna Izquierda: Ajustes de la pestaña activa */}
               <div className="flex flex-col gap-5 justify-between">
                 
-                {/* PESTAÑA: ELIMINACIÓN DE FONDO */}
                 {activeTab === 'bg' && (
                   <div className="flex flex-col gap-4">
-                    {/* Switch principal para activar remoción */}
                     <div className="flex items-center justify-between bg-slate-950 p-3 rounded-xl border border-slate-800">
                       <label className="text-xs font-bold text-slate-300">Activar Remoción de Fondo</label>
                       <input 
@@ -1976,7 +1712,6 @@ export default function App() {
 
                     {isBgRemovalActive && (
                       <>
-                        {/* Selector de Modo de Borrado */}
                         <div>
                           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Modo de Selección</span>
                           <div className="grid grid-cols-2 gap-2">
@@ -2005,7 +1740,6 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Presets Rápidos */}
                         <div>
                           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Preajustes Rápidos</span>
                           <div className="grid grid-cols-2 gap-2">
@@ -2042,7 +1776,6 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Muestra Activa */}
                         <div className="bg-slate-950 border border-slate-850 p-3.5 rounded-2xl flex flex-col gap-2">
                           <span className="text-xs font-bold text-slate-400 block">Color de Fondo Seleccionado</span>
                           <div className="flex items-center gap-3">
@@ -2057,7 +1790,6 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Tolerancia */}
                         <div>
                           <div className="flex justify-between items-center mb-1">
                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tolerancia base</span>
@@ -2073,7 +1805,6 @@ export default function App() {
                           />
                         </div>
 
-                        {/* Limpieza de Halo */}
                         <div>
                           <div className="flex justify-between items-center mb-1">
                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
@@ -2099,35 +1830,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* === PESTAÑA: GOMA DE BORRAR MANUAL === */}
-                {activeTab === 'eraser' && (
-                  <div className="flex flex-col gap-4">
-                    <div className="bg-slate-950 border border-slate-800 p-4 rounded-2xl flex flex-col gap-3">
-                      <span className="text-xs font-bold text-slate-300 block">🧼 Instrucciones de la Goma</span>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Haz clic y mantén presionado sobre la imagen de la derecha para <strong>borrar manualmente</strong> las anillas fantasma, firmas o imperfecciones que la varita mágica automática no haya podido eliminar.
-                      </p>
-                    </div>
-
-                    {/* Slider del Tamaño de Goma */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tamaño de la Goma</span>
-                        <span className="text-xs font-mono font-bold text-cyan-400">{eraserSize} px</span>
-                      </div>
-                      <input 
-                        type="range" 
-                        min="5" 
-                        max="100" 
-                        value={eraserSize} 
-                        onChange={(e) => setEraserSize(parseInt(e.target.value))}
-                        className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* PESTAÑA: CONTORNO / BORDE OFFSET */}
                 {activeTab === 'stroke' && (
                   <div className="flex flex-col gap-4">
                     <div className="flex items-center justify-between bg-slate-950 p-3 rounded-xl border border-slate-800">
@@ -2142,7 +1844,6 @@ export default function App() {
 
                     {strokeEnabled && (
                       <>
-                        {/* Slider de Grosor en MM */}
                         <div>
                           <div className="flex justify-between items-center mb-1">
                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Grosor de Contorno</span>
@@ -2159,7 +1860,6 @@ export default function App() {
                           />
                         </div>
 
-                        {/* Selección de Color del Borde */}
                         <div>
                           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Color del Contorno</span>
                           <div className="flex gap-2 mb-3">
@@ -2177,20 +1877,22 @@ export default function App() {
                             />
                           </div>
 
-                          {/* Accesos rápidos */}
                           <div className="flex gap-1.5 flex-wrap">
                             {[
                               { hex: '#ffffff', label: 'Blanco' },
                               { hex: '#ff00ff', label: 'Corte (Magenta)' },
                               { hex: '#00ffff', label: 'Cian' },
                               { hex: '#ffff00', label: 'Amarillo' },
-                              { hex: '#ff0000', label: 'Rojo' }
+                              { hex: '#ff0000', label: 'Rojo' },
+                              { hex: '#00ff00', label: 'Verde' }
                             ].map(color => (
                               <button
                                 key={color.hex}
+                                type="button"
                                 onClick={() => setStrokeColor(color.hex)}
-                                className="w-7 h-7 rounded-lg border border-slate-800 transition-transform hover:scale-110 shrink-0"
+                                className="w-7 h-7 rounded-lg border border-slate-800 transition-transform hover:scale-110 shrink-0 focus:outline-none"
                                 style={{ backgroundColor: color.hex }}
+                                title={`${color.label}: ${color.hex}`}
                               />
                             ))}
                           </div>
@@ -2200,7 +1902,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Restablecer Original */}
                 <button
                   onClick={restoreOriginalImage}
                   className="py-2.5 px-4 bg-red-950/40 hover:bg-red-950/60 border border-red-900/60 text-red-300 rounded-xl text-xs font-bold transition-colors w-full focus:outline-none"
@@ -2209,18 +1910,9 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Columna Derecha: Canvas Interactivo de Previsualización */}
               <div className="md:col-span-2 flex flex-col gap-2 overflow-hidden justify-center items-center">
-                <span className="text-xs font-bold text-slate-500 self-start mb-1">
-                  {activeTab === 'eraser' 
-                    ? '🧼 Arrastra el ratón sobre las imperfecciones de la imagen para borrarlas:'
-                    : 'Previsualización del Sticker (Haz clic sobre el fondo para remover):'}
-                </span>
-                
-                {/* CANVAS RECEPTOR DE LOS TRAZOS DE BORRADO MANUAL (PERSISTENTE) */}
-                <canvas ref={eraserCanvasRef} style={{ display: 'none' }} />
-
-                <div className="flex-1 w-full bg-slate-950 border border-slate-800 rounded-2xl relative flex items-center justify-center p-4 checkboard-pattern overflow-auto select-none">
+                <span className="text-xs font-bold text-slate-500 self-start mb-1">Previsualización del Sticker (Haz clic sobre el fondo para remover):</span>
+                <div className="flex-1 w-full bg-slate-950 border border-slate-800 rounded-2xl relative flex items-center justify-center p-4 checkboard-pattern overflow-auto">
                   <canvas 
                     ref={previewCanvasRef} 
                     className="max-w-full max-h-[45vh] object-contain rounded-lg shadow-xl"
@@ -2231,25 +1923,19 @@ export default function App() {
                       src={removalPreviewUrl} 
                       alt="Preview" 
                       onClick={handleCanvasClick}
-                      onMouseDown={handleEraserMouseDown}
-                      onMouseMove={handleEraserMouseMove}
-                      onMouseUp={handleEraserMouseUp}
-                      onMouseLeave={handleEraserMouseUp}
-                      className={`max-w-full max-h-[45vh] object-contain rounded-lg transition-all ${
-                        activeTab === 'eraser' ? 'cursor-cell ring-1 ring-cyan-500/25' : 'cursor-crosshair hover:ring-2 hover:ring-cyan-500/50'
-                      }`}
+                      className="max-w-full max-h-[45vh] object-contain cursor-crosshair rounded-lg hover:ring-2 hover:ring-cyan-500/50 transition-all"
+                      title="Haz clic sobre cualquier color para removerlo del fondo"
                     />
                   )}
                 </div>
                 <div className="text-[10px] text-slate-400 text-center flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                  Consejo: Pasa la Goma de borrar por las orillas de la ilustración para rebanar cualquier "anilla" sucia.
+                  Consejo: Usa "Varita Mágica" y sube el deslizador de "Limpieza de Halo" para borrar impurezas de bordes.
                 </div>
               </div>
 
             </div>
 
-            {/* Footer Modal Acciones */}
             <div className="flex justify-end gap-3 pt-4 border-t border-slate-800 mt-2">
               <button 
                 onClick={() => setEditingImage(null)}
@@ -2259,7 +1945,7 @@ export default function App() {
               </button>
               <button 
                 onClick={saveTransparentImage}
-                className="py-2 px-6 rounded-xl text-xs font-extrabold bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-md shadow-cyan-500/10 focus:outline-none"
+                className="py-2 px-6 rounded-xl text-xs font-extrabold bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-md shadow-cyan-500/10 focus:outline-none"
               >
                 Guardar y Aplicar al Layout
               </button>
