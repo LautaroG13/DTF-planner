@@ -521,7 +521,7 @@ export default function App() {
   const generatePDF = async () => {
     if (packedSheets.length === 0) return;
     setIsGeneratingPdf(true);
-    setPdfProgress('Iniciando PDF...');
+    setPdfProgress('Iniciando PDF....');
 
     try {
       const { jsPDF } = window.jspdf;
