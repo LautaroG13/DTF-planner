@@ -10,7 +10,6 @@ const INITIAL_THEMES = [
 ];
 
 export default function App() {
-  // === 1. DECLARACIÓN DE TODOS LOS ESTADOS AL PRINCIPIO DEL COMPONENTE ===
   const [images, setImages] = useState([]);
   const [themes, setThemes] = useState(INITIAL_THEMES);
   const [newThemeName, setNewThemeName] = useState('');
@@ -307,21 +306,6 @@ export default function App() {
       };
     });
     setImages(prev => [...prev, ...parsedImages]);
-  };
-
-  // === FUNCIÓN PARA AGREGAR TEMÁTICAS RECONSTRUIDA ===
-  const addTheme = (e) => {
-    e.preventDefault();
-    if (!newThemeName.trim()) return;
-    const newTheme = {
-      id: 't_custom_' + Math.random().toString(36).substr(2, 5),
-      name: newThemeName.trim(),
-      color: newThemeColor,
-      defaultWidth: newThemeWidth * 10,  // Convertido a mm (cm * 10)
-      defaultHeight: newThemeHeight * 10 // Convertido a mm (cm * 10)
-    };
-    setThemes(prev => [...prev, newTheme]);
-    setNewThemeName('');
   };
 
   const applyImageEffects = (sticker, effectsConfig, onComplete) => {
@@ -698,6 +682,7 @@ export default function App() {
     }
   };
 
+  // (Helper algorithm)
   const runShelfPacker = (items, totalWidth, totalHeight, margin, safe) => {
     const printableWidth = totalWidth - (safe * 2);
     const printableHeight = totalHeight - (safe * 2);
@@ -962,6 +947,7 @@ export default function App() {
             </button>
           </div>
 
+          {}
           {isConfigOpen && (
             <div className="flex flex-col gap-4 animate-fade-in">
               {/* 1. CONFIGURACIÓN DE PELÍCULA */}
@@ -1203,6 +1189,7 @@ export default function App() {
             </div>
           </div>
 
+          {/* === STREAMING_CHUNK:Rendering uploaded stickers grid... === */}
           {/* 4. LISTADO EN GRILLA DE STICKERS CARGADOS */}
           <div className="flex-1 flex flex-col gap-3 min-h-[300px]">
             <div className="flex justify-between items-center bg-slate-900/30 p-2 rounded-xl border border-slate-800/60">
@@ -1297,6 +1284,7 @@ export default function App() {
           </div>
         </aside>
 
+        {/* === STREAMING_CHUNK:Rendering main printable sheet canvas... === */}
         {/* ÁREA DE PREVIEW Y PLANCHAS GENERAL */}
         <main className="flex-1 bg-slate-900 p-6 flex flex-col gap-4 overflow-hidden relative">
           
