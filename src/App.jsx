@@ -316,10 +316,10 @@ export default function App() {
       const ctx = canvas.getContext('2d');
       
       const crop = effectsConfig.crop || { top: 0, bottom: 0, left: 0, right: 0 };
-      const startX = (crop.left / 100) * tempImg.width;
-      const startY = (crop.top / 100) * tempImg.height;
-      const cutWidth = tempImg.width * (1 - (crop.left + crop.right) / 100);
-      const cutHeight = tempImg.height * (1 - (crop.top + crop.bottom) / 100);
+      const startX = Math.round((crop.left / 100) * tempImg.width);
+      const startY = Math.round((crop.top / 100) * tempImg.height);
+      const cutWidth = Math.round(tempImg.width * (1 - (crop.left + crop.right) / 100));
+      const cutHeight = Math.round(tempImg.height * (1 - (crop.top + crop.bottom) / 100));
       
       canvas.width = cutWidth > 0 ? cutWidth : tempImg.width;
       canvas.height = cutHeight > 0 ? cutHeight : tempImg.height;
@@ -448,6 +448,113 @@ export default function App() {
       }
     };
     tempImg.src = sticker.originalUrl;
+  };
+
+  // === FUNCIONES FALTANTES QUE CAUSABAN LA PANTALLA BLANCA ===
+
+  const removeImage = (id) => {
+    setImages(prev => prev.filter(img => img.id !== id));
+  };
+
+  const addTheme = (e) => {
+    e.preventDefault();
+    if (!newThemeName.trim()) return;
+    const newTheme = {
+      id: 'theme_' + Math.random().toString(36).substr(2, 9),
+      name: newThemeName.trim(),
+      color: newThemeColor,
+      defaultWidth: Math.round(newThemeWidth * 10),
+      defaultHeight: Math.round(newThemeHeight * 10)
+    };
+    setThemes(prev => [...prev, newTheme]);
+    setNewThemeName('');
+    setNewThemeColor('#EC4899');
+    setNewThemeWidth(40);
+    setNewThemeHeight(20);
+  };
+
+  const openEditorModal = (img) => {
+    setEditingSticker(img);
+    setCropMode(false);
+    // Inicializar cropBounds desde los efectos guardados del sticker
+    const savedCrop = img.effects?.crop || { top: 0, bottom: 0, left: 0, right: 0 };
+    setCropBounds(savedCrop);
+    // Cargar efectos guardados del sticker en el editor
+    setEditorEffects({
+      removeBg: img.effects?.removeBg ?? false,
+      bgTargetColor: img.effects?.bgTargetColor ?? '#ffffff',
+      bgTolerance: img.effects?.bgTolerance ?? 40,
+      colorMode: img.effects?.colorMode ?? 'original',
+      primaryColor: img.effects?.primaryColor ?? '#3b82f6',
+      secondaryColor: img.effects?.secondaryColor ?? '#ffffff',
+      strokeWidth: img.effects?.strokeWidth ?? 0,
+      strokeColor: img.effects?.strokeColor ?? '#ffffff',
+      name: img.name ?? '',
+      quantity: img.quantity ?? 1,
+      targetSize: img.targetSize ?? globalTargetSize,
+      sizingMode: img.sizingMode ?? 'max',
+      theme: img.theme ?? 't_general',
+      customWidth: img.customWidth ?? globalTargetSize,
+      customHeight: img.customHeight ?? globalTargetSize
+    });
+    // Inicializar preview con la imagen actual
+    setLocalPreviewUrl(img.previewUrl);
+  };
+
+  const saveEditorChanges = () => {
+    if (!editingSticker) return;
+
+    const activeEffectsConfig = {
+      ...editorEffects,
+      crop: { ...cropBounds }
+    };
+
+    applyImageEffects(editingSticker, activeEffectsConfig, (processedUrl, newAspectRatio) => {
+      setImages(prev => prev.map(img => {
+        if (img.id !== editingSticker.id) return img;
+        return {
+          ...img,
+          name: editorEffects.name || img.name,
+          previewUrl: processedUrl,
+          aspectRatio: newAspectRatio ?? img.aspectRatio,
+          quantity: editorEffects.quantity,
+          sizingMode: editorEffects.sizingMode,
+          targetSize: editorEffects.targetSize,
+          customWidth: editorEffects.customWidth,
+          customHeight: editorEffects.customHeight,
+          theme: editorEffects.theme,
+          effects: {
+            removeBg: editorEffects.removeBg,
+            bgTargetColor: editorEffects.bgTargetColor,
+            bgTolerance: editorEffects.bgTolerance,
+            colorMode: editorEffects.colorMode,
+            primaryColor: editorEffects.primaryColor,
+            secondaryColor: editorEffects.secondaryColor,
+            strokeWidth: editorEffects.strokeWidth,
+            strokeColor: editorEffects.strokeColor,
+            crop: { ...cropBounds }
+          }
+        };
+      }));
+      setEditingSticker(null);
+      setLocalPreviewUrl('');
+    });
+  };
+
+  const downloadSingleSticker = (sticker) => {
+    if (!sticker) return;
+    const activeEffectsConfig = {
+      ...editorEffects,
+      crop: { ...cropBounds }
+    };
+    applyImageEffects(sticker, activeEffectsConfig, (processedUrl) => {
+      const link = document.createElement('a');
+      link.href = processedUrl;
+      link.download = `${editorEffects.name || sticker.name || 'sticker'}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
   };
 
   const recalculateLayout = () => {
@@ -675,6 +782,7 @@ export default function App() {
         sheet.id = idx + 1;
         sheet.themeName = 'Mixto (Optimizado)';
         sheet.themeColor = '#10B981';
+        sheet.packedBlocks = []; // modo optimizado no tiene blocks
       });
 
       setPackedSheets(tempSheets);
@@ -769,6 +877,25 @@ export default function App() {
 
   const generatePDF = async () => {
     if (packedSheets.length === 0) return;
+
+    // Esperar a que jsPDF esté disponible
+    if (!window.jspdf) {
+      setPdfProgress('Cargando librería PDF...');
+      await new Promise((resolve, reject) => {
+        let attempts = 0;
+        const interval = setInterval(() => {
+          attempts++;
+          if (window.jspdf) {
+            clearInterval(interval);
+            resolve();
+          } else if (attempts > 30) {
+            clearInterval(interval);
+            reject(new Error('jsPDF no pudo cargarse'));
+          }
+        }, 200);
+      });
+    }
+
     setIsGeneratingPdf(true);
     setPdfProgress('Iniciando PDF...');
 
@@ -1550,10 +1677,12 @@ export default function App() {
                       style={{
                         top: `${safeMargin * scale}px`,
                         left: `${safeMargin * scale}px`,
-                        right: `${safeMargin * scale}px`,
-                        bottom: `${safeMargin * scale}px`,
-                        width: isRotated ? `${(sheetHeight - (safeMargin * 2)) * scale}px` : `${(sheetWidth - (safeMargin * 2)) * scale}px`,
-                        height: isRotated ? `${(sheetWidth - (safeMargin * 2)) * scale}px` : `${(sheetHeight - (safeMargin * 2)) * scale}px`
+                        width: isRotated 
+                          ? `${(sheetHeight - safeMargin * 2) * scale}px` 
+                          : `${(sheetWidth - safeMargin * 2) * scale}px`,
+                        height: isRotated 
+                          ? `${(sheetWidth - safeMargin * 2) * scale}px` 
+                          : `${(sheetHeight - safeMargin * 2) * scale}px`
                       }}
                     >
                       <span className="absolute -top-4 left-1 text-[8px] text-red-500/70 font-bold uppercase tracking-wider">
@@ -1756,7 +1885,7 @@ export default function App() {
                   <div 
                     ref={cropContainerRef}
                     className="relative max-w-full max-h-[340px] select-none"
-                    style={{ aspectRatio: editingSticker.aspectRatio || 1 }}
+                    style={{ aspectRatio: `${editingSticker.originalWidth || 1} / ${editingSticker.originalHeight || 1}` }}
                   >
                     {/* Imagen de fondo atenuada de referencia */}
                     <img 
