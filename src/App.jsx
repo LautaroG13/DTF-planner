@@ -1,517 +1,204 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { initializeApp, getApps } from 'firebase/app';
-import { 
-  getAuth, 
-  signInAnonymously, 
-  signInWithCustomToken, 
-  onAuthStateChanged,
-  signInWithPopup,
-  GoogleAuthProvider,
-  signOut
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  doc, 
-  setDoc, 
-  updateDoc, 
-  onSnapshot 
-} from 'firebase/firestore';
 
-// ======================================================================
-// CONFIGURACIÓN DE FIREBASE E INICIALIZACIÓN SEGURA (REGLAS DE CANVAS)
-// ======================================================================
-const firebaseConfig = { 
-  apiKey: "AIzaSyBLh4BqwjsIsELfU6hcss6XdQVNcD78ktE", 
-  authDomain: "dtf-planner.firebaseapp.com", 
-  projectId: "dtf-planner", 
-  storageBucket: "dtf-planner.firebasestorage.app", 
-  messagingSenderId: "681992689098", 
-  appId: "1:681992689098:web:c1ee9e6b7dd809c99beb33", 
-  measurementId: "G-QQEJLNGNZS" 
-};
-
-// Evitar doble inicialización en Hot Reload de Vite
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'dtf-planner-pro';
-
-// === CONFIGURACIÓN INICIAL DE PLANCHAS PEQUEÑAS (SUB-TEMPLATES) ===
-const INITIAL_PLANCHAS = [
-  { id: 'p1', name: 'Plancha Argentina (14x20 cm)', width: 140, height: 200, spacing: 3, safeMargin: 5, color: '#3B82F6' },
-  { id: 'p2', name: 'Logos Club (12x10 cm)', width: 120, height: 100, spacing: 3, safeMargin: 5, color: '#8B5CF6' },
-  { id: 'p3', name: 'Etiquetas Regalo (15x15 cm)', width: 150, height: 150, spacing: 3, safeMargin: 5, color: '#10B981' }
+// === CONFIGURACIÓN INICIAL DE TEMÁTICAS CON ANCHO Y ALTO PREDETERMINADO ===
+const INITIAL_THEMES = [
+  { id: 't1', name: 'Anime & Gaming', color: '#8B5CF6', defaultWidth: 400, defaultHeight: 120 }, // Planchita de 40 x 12 cm
+  { id: 't2', name: 'Logos & Marcas', color: '#3B82F6', defaultWidth: 500, defaultHeight: 150 }, // Planchita de 50 x 15 cm
+  { id: 't3', name: 'Mascotas & Kawaii', color: '#10B981', defaultWidth: 300, defaultHeight: 150 }, // Planchita de 30 x 15 cm
+  { id: 't4', name: 'Frases & Tipografía', color: '#F59E0B', defaultWidth: 580, defaultHeight: 200 }, // Planchita de 58 x 20 cm
+  { id: 't_general', name: 'General', color: '#6B7280', defaultWidth: 400, defaultHeight: 200 } // Planchita de 40 x 20 cm
 ];
 
-const PLANES = {
-  libre: { 
-    nombre: "Invitado / Demo", 
-    descargasMax: 5, 
-    herramientas: ["borrar_1_color"], 
-    premium: false,
-    link: null 
-  },
-  basico: { 
-    nombre: "Plan Básico", 
-    precio: "$2.000", 
-    descargasMax: 15, 
-    herramientas: ["borrar_1_color", "descargar_pdf"], 
-    premium: true,
-    link: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=1e67e93b5d3a4cb68e7c97edacec40c3"
-  },
-  intermedio: { 
-    nombre: "Plan Intermedio", 
-    precio: "$7.000", 
-    descargasMax: 30, 
-    herramientas: ["borrar_2_colores", "descargar_pdf", "descargar_png"], 
-    premium: true,
-    link: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=ebe38c24a8384b57913478f1ecd765b8"
-  },
-  avanzado: { 
-    nombre: "Plan Avanzado", 
-    precio: "$20.000", 
-    descargasMax: Infinity, 
-    herramientas: ["borrar_2_colores", "descargar_pdf", "descargar_png", "corte_manual", "goma_borrar", "offset_borders"], 
-    premium: true,
-    link: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=54706a6b0fd340b980b056f7f4f5df93"
-  }
-};
-
-// Helper para convertir HEX a RGB en la generación del PDF
-function hexToRgb(hex) {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16)
-  } : null;
-}
-
-// === FUNCIÓN DE RECORTE AUTOMÁTICO DE TRANSPARENCIAS (AUTOCROP) ===
-function trimTransparentCanvas(canvas, alphaThreshold = 10) {
-  const ctx = canvas.getContext('2d');
-  const width = canvas.width;
-  const height = canvas.height;
-  const imgData = ctx.getImageData(0, 0, width, height);
-  const data = imgData.data;
-
-  let minX = width;
-  let maxX = 0;
-  let minY = height;
-  let maxY = 0;
-  let foundPixel = false;
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const alpha = data[(y * width + x) * 4 + 3];
-      if (alpha >= alphaThreshold) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-        foundPixel = true;
-      }
-    }
-  }
-
-  if (!foundPixel) return canvas; 
-
-  minX = Math.max(0, minX - 1);
-  minY = Math.max(0, minY - 1);
-  maxX = Math.min(width - 1, maxX + 1);
-  maxY = Math.min(height - 1, maxY + 1);
-
-  const croppedWidth = maxX - minX + 1;
-  const croppedHeight = maxY - minY + 1;
-
-  const croppedCanvas = document.createElement('canvas');
-  croppedCanvas.width = croppedWidth;
-  croppedCanvas.height = croppedHeight;
-  const croppedCtx = croppedCanvas.getContext('2d');
-
-  croppedCtx.drawImage(canvas, minX, minY, croppedWidth, croppedHeight, 0, 0, croppedWidth, croppedHeight);
-  return croppedCanvas;
-}
-
-// Algoritmo para empaquetar stickers individuales dentro de un bloque chico (Paso 1)
-const packStickersSingleBlock = (items, totalWidth, totalHeight, spacing, safe) => {
-  const printableWidth = totalWidth - (safe * 2);
-  const printableHeight = totalHeight - (safe * 2);
-
-  const sortedItems = [...items].sort((a, b) => b.height - a.height);
-  const packedItems = [];
-  const shelves = [];
-
-  sortedItems.forEach(item => {
-    let placed = false;
-
-    for (const shelf of shelves) {
-      if (shelf.currentX + item.width <= printableWidth && item.height <= shelf.height * 1.35) {
-        packedItems.push({
-          ...item,
-          x: shelf.currentX + safe,
-          y: shelf.y + safe
-        });
-        shelf.currentX += item.width + spacing;
-        if (item.height > shelf.height) {
-          shelf.height = item.height;
-        }
-        placed = true;
-        break;
-      }
-    }
-
-    if (!placed) {
-      const lastShelfY = shelves.length > 0
-        ? shelves[shelves.length - 1].y + shelves[shelves.length - 1].height + spacing
-        : 0;
-
-      if (lastShelfY + item.height <= printableHeight) {
-        const newShelf = {
-          y: lastShelfY,
-          height: item.height,
-          currentX: item.width + spacing
-        };
-        shelves.push(newShelf);
-        packedItems.push({
-          ...item,
-          x: safe,
-          y: lastShelfY + safe
-        });
-        placed = true;
-      }
-    }
-  });
-
-  return packedItems;
-};
-
-// Algoritmo modificado para acomodar en las medidas exactas de los pliegos manuales (Paso 2)
-const packPlanchasOntoMasterRoll = (planchasToPack, userPliegos, spacing, safe) => {
-  const sortedPlanchas = [...planchasToPack].sort((a, b) => b.height - a.height);
-  const sheets = userPliegos.map((pl, idx) => ({
-    id: pl.id,
-    name: pl.name || `Pliego ${idx + 1}`,
-    width: pl.width,
-    height: pl.height,
-    safeMargin: safe,
-    spacing: spacing,
-    packedPlanchas: [],
-    shelves: [],
-    areaUtilized: 0
-  }));
-
-  sortedPlanchas.forEach(plancha => {
-    let placed = false;
-
-    for (const sheet of sheets) {
-      const printableWidth = sheet.width - (safe * 2);
-      const printableHeight = sheet.height - (safe * 2);
-
-      for (const shelf of sheet.shelves) {
-        if (shelf.currentX + plancha.width <= printableWidth && plancha.height <= shelf.height * 1.35) {
-          sheet.packedPlanchas.push({
-            ...plancha,
-            x: shelf.currentX + safe,
-            y: shelf.y + safe
-          });
-          shelf.currentX += plancha.width + spacing;
-          if (plancha.height > shelf.height) {
-            shelf.height = plancha.height;
-          }
-          sheet.areaUtilized += plancha.width * plancha.height;
-          placed = true;
-          break;
-        }
-      }
-      if (placed) break;
-
-      const lastShelfY = sheet.shelves.length > 0
-        ? sheet.shelves[sheet.shelves.length - 1].y + sheet.shelves[sheet.shelves.length - 1].height + spacing
-        : 0;
-
-      if (lastShelfY + plancha.height <= printableHeight) {
-        const newShelf = {
-          y: lastShelfY,
-          height: plancha.height,
-          currentX: plancha.width + spacing
-        };
-        sheet.shelves.push(newShelf);
-        sheet.packedPlanchas.push({
-          ...plancha,
-          x: safe,
-          y: lastShelfY + safe
-        });
-        sheet.areaUtilized += plancha.width * plancha.height;
-        placed = true;
-        break;
-      }
-    }
-  });
-
-  sheets.forEach(sheet => {
-    const printableWidth = sheet.width - (safe * 2);
-    const printableHeight = sheet.height - (safe * 2);
-    const printableArea = printableWidth * printableHeight;
-    sheet.utilizationPercentage = Math.min(100, Math.round((sheet.areaUtilized / printableArea) * 100)) || 0;
-  });
-
-  return sheets;
-};
-
 export default function App() {
-  // Configuración de Perfil de Taller / Suscripciones Firebase (RULE 3)
-  const [user, setUser] = useState(null);
-  const [userProfile, setUserProfile] = useState({ plan: "libre", descargasUsadas: 0 });
-  const [credits, setCredits] = useState(5);
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-
-  // Estados de Pliegos y Páginas Master
-  const [masterWidth, setMasterWidth] = useState(580);
-  const [masterHeight, setMasterHeight] = useState(1000);
-  const [pliegos, setPliegos] = useState([
-    { id: 'pl_1', name: 'Pliego Producción 1', width: 580, height: 1000 }
-  ]);
-  const [activePliegoIndex, setActivePliegoIndex] = useState(0);
-  
-  const [planchas, setPlanchas] = useState(INITIAL_PLANCHAS);
-  const [selectedPlanchaForUpload, setSelectedPlanchaForUpload] = useState('p1');
-  
-  const [newPlanchaName, setNewPlanchaName] = useState('');
-  const [newPlanchaWidth, setNewPlanchaWidth] = useState(14);
-  const [newPlanchaHeight, setNewPlanchaHeight] = useState(20);
-  const [newPlanchaSpacing, setNewPlanchaSpacing] = useState(3);
-  const [newPlanchaSafeMargin, setNewPlanchaSafeMargin] = useState(5);
-  const [newPlanchaColor, setNewPlanchaColor] = useState('#EC4899');
-
+  // === 1. DECLARACIÓN DE TODOS LOS ESTADOS AL PRINCIPIO DEL COMPONENTE ===
   const [images, setImages] = useState([]);
+  const [themes, setThemes] = useState(INITIAL_THEMES);
+  const [newThemeName, setNewThemeName] = useState('');
+  const [newThemeColor, setNewThemeColor] = useState('#EC4899');
+  const [newThemeWidth, setNewThemeWidth] = useState(40); // default 40 cm
+  const [newThemeHeight, setNewThemeHeight] = useState(20); // default 20 cm
+  const [selectedThemeForUpload, setSelectedThemeForUpload] = useState('t_general');
   
-  const [pricePerMeter, setPricePerMeter] = useState(12000); 
+  // Parámetros de la plancha
+  const [sheetWidth, setSheetWidth] = useState(580); // en mm (58 cm)
+  const [sheetHeight, setSheetHeight] = useState(1000); // en mm (100 cm)
+  const [spacing, setSpacing] = useState(5); // espacio entre stickers en mm (0.5 cm)
+  const [safeMargin, setSafeMargin] = useState(10); // margen de seguridad en mm (1 cm)
+  
+  // Parámetros de empaque y negocio
+  const [packingMode, setPackingMode] = useState('theme'); // 'theme' (Agrupado por Planchitas) o 'optimized' (Mezclado)
+  const [globalTargetSize, setGlobalTargetSize] = useState(40); // 4 cm por defecto
+  const [pricePerMeter, setPricePerMeter] = useState(12000); // Precio por metro de film
   const [currencySymbol, setCurrencySymbol] = useState('$');
   const [showCutMarks, setShowCutMarks] = useState(true);
   
-  const [isConfigOpen, setIsConfigOpen] = useState(false); 
-  const [isPlanchasManagerOpen, setIsPlanchasManagerOpen] = useState(true);
-  const [isImagesListOpen, setIsImagesListOpen] = useState(true);
+  // Estados de edición unificada (Modal)
+  const [editingSticker, setEditingSticker] = useState(null); 
+  const [cropMode, setCropMode] = useState(false); 
+  
+  // Límites del recorte en porcentaje desde los bordes de la imagen original
+  const [cropBounds, setCropBounds] = useState({ top: 5, right: 5, bottom: 5, left: 5 });
+  
+  // Estados para controlar el arrastre y redimensionado del recuadro de recorte interactivo
+  const [dragType, setDragType] = useState(null); 
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0, w: 0, h: 0, mouseX: 0, mouseY: 0, containerWidth: 0, containerHeight: 0 });
 
+  // URL de previsualización procesada en tiempo real para el modal
+  const [localPreviewUrl, setLocalPreviewUrl] = useState('');
+
+  // Estado de UI y Orientación de Visualización
   const [packedSheets, setPackedSheets] = useState([]);
-  const [zoomLevel, setZoomLevel] = useState(65); 
-  const [isRotated, setIsRotated] = useState(true); 
+  const [activeSheetIndex, setActiveSheetIndex] = useState(0);
+  const [zoomLevel, setZoomLevel] = useState(65); // % de escala visual
+  const [isRotated, setIsRotated] = useState(true); // TRUE = Vista Horizontal, FALSE = Vista Vertical
   const [hoveredSticker, setHoveredSticker] = useState(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfProgress, setPdfProgress] = useState('');
   const [isDragging, setIsDragging] = useState(false);
 
-  // Estados del Editor de Stickers (Quitar fondo dual y Bordes)
-  const [editingImage, setEditingImage] = useState(null); 
-  const [activeTab, setActiveTab] = useState('bg'); 
-  const [bgMode, setBgMode] = useState('contiguous');
-  const [clickCoords, setClickCoords] = useState({ x: 0, y: 0 }); 
-  const [isBgRemovalActive, setIsBgRemovalActive] = useState(false);
-  const [bgTolerance, setBgTolerance] = useState(15); 
-  const [haloCleanup, setHaloCleanup] = useState(1); 
-  const [targetBgColor, setTargetBgColor] = useState({ r: 255, g: 255, b: 255 });
-  
-  // Canales Duales de Borrado
-  const [colorBorrar1, setColorBorrar1] = useState({ r: 255, g: 255, b: 255 });
-  const [colorBorrar2, setColorBorrar2] = useState({ r: 0, g: 0, b: 0 });
-  const [isColor2Enabled, setIsColor2Enabled] = useState(false);
-  const [activeColorSlot, setActiveColorSlot] = useState(1); // 1 = Color 1, 2 = Color 2
+  // Estado temporal de efectos para el sticker en edición
+  const [editorEffects, setEditorEffects] = useState({
+    removeBg: false,
+    bgTargetColor: '#ffffff',
+    bgTolerance: 40,
+    colorMode: 'original', 
+    primaryColor: '#ffffff',
+    secondaryColor: '#000000',
+    strokeWidth: 0, 
+    strokeColor: '#ffffff',
+    name: '',
+    quantity: 1,
+    targetSize: 40,
+    sizingMode: 'max',
+    theme: 't_general',
+    customWidth: 40, 
+    customHeight: 40 
+  });
 
-  // Herramienta de Recorte Manual (Crop)
-  const [cropEnabled, setCropEnabled] = useState(false);
-  const [cropBox, setCropBox] = useState({ x: 10, y: 10, width: 80, height: 80 }); // En %
-  const [isDraggingCrop, setIsDraggingCrop] = useState(false);
-  const dragStartOffset = useRef({ x: 0, y: 0 });
-
-  const [strokeEnabled, setStrokeEnabled] = useState(false);
-  const [strokeWidth, setStrokeWidth] = useState(2); 
-  const [strokeColor, setStrokeColor] = useState('#ffffff'); 
-  const [editedAspectRatio, setEditedAspectRatio] = useState(1);
-  const [removalPreviewUrl, setRemovalPreviewUrl] = useState('');
-  const [originalBackupUrl, setOriginalBackupUrl] = useState(''); 
+  // === 2. VARIABLES CALCULADAS DERIVADAS ===
+  const totalMetersUsed = (packedSheets.length * (sheetHeight / 1000)).toFixed(2);
+  const totalCostEstimate = (parseFloat(totalMetersUsed) * pricePerMeter).toLocaleString('es-ES', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  });
   
   const fileInputRef = useRef(null);
-  const previewCanvasRef = useRef(null);
+  const cropContainerRef = useRef(null);
 
-  // Sincronización e Integración con Firebase (RULE 3)
+  // Carga dinámica de jsPDF para exportación de alta calidad
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Falla en Autenticación Firebase: ", err);
-      }
-    };
-    initAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        const userProfileRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'subscription');
-        const unsubDoc = onSnapshot(userProfileRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            setUserProfile(data);
-            const planData = PLANES[data.plan || 'libre'];
-            setCredits(planData.descargasMax === Infinity ? Infinity : Math.max(0, planData.descargasMax - (data.descargasUsadas || 0)));
-          } else {
-            setDoc(userProfileRef, { plan: 'libre', descargasUsadas: 0 });
-            setCredits(5);
-          }
-        });
-        return () => unsubDoc();
-      }
-    });
-
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
     script.async = true;
     document.body.appendChild(script);
     return () => {
-      unsubscribe();
       if (document.body.contains(script)) {
         document.body.removeChild(script);
       }
     };
   }, []);
 
+  // Procesar empaquetado cada vez que cambien las imágenes, parámetros o las temáticas
   useEffect(() => {
-    recalculateLayouts();
-  }, [images, planchas, pliegos, activePliegoIndex]);
+    recalculateLayout();
+  }, [images, sheetWidth, sheetHeight, spacing, safeMargin, packingMode, globalTargetSize, themes]);
 
-  // SOLUCIÓN AL BUG DE EDITAR: Sincronización asíncrona perfecta con el canvas persistente
+  // === AUTO-PREVIEW EN TIEMPO REAL ===
   useEffect(() => {
-    if (editingImage && originalBackupUrl) {
-      const timer = setTimeout(() => {
-        applyImageEdits();
-      }, 50);
-      return () => clearTimeout(timer);
-    }
-  }, [editingImage, bgTolerance, colorBorrar1, colorBorrar2, isColor2Enabled, bgMode, clickCoords, originalBackupUrl, isBgRemovalActive, strokeEnabled, strokeWidth, strokeColor, haloCleanup, cropEnabled, cropBox]);
+    if (!editingSticker) return;
 
-  const openBackgroundRemovalModal = (img) => {
-    setEditingImage(img);
-    setOriginalBackupUrl(img.originalBackupUrl || img.previewUrl);
-    setBgTolerance(img.bgTolerance !== undefined ? img.bgTolerance : 15);
-    setHaloCleanup(img.haloCleanup !== undefined ? img.haloCleanup : 1);
-    setTargetBgColor(img.targetBgColor || { r: 255, g: 255, b: 255 });
-    setBgMode(img.bgMode || 'contiguous'); 
-    setClickCoords({ x: 0, y: 0 }); 
-    setIsBgRemovalActive(img.isBgRemovalActive || false);
-    setStrokeEnabled(img.strokeEnabled || false);
-    setStrokeWidth(img.strokeWidth || 2);
-    setStrokeColor(img.strokeColor || '#ffffff');
-    setRemovalPreviewUrl(img.previewUrl);
-    setEditedAspectRatio(img.aspectRatio || 1);
-    setActiveTab('bg');
-  };
-
-  const handleLoginGoogle = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      await signInWithPopup(auth, provider);
-    } catch (err) {
-      console.error("Error al iniciar sesión con Google: ", err);
-      if (err.code === 'auth/admin-restricted-operation') {
-        alert("El inicio de sesión con Google está restringido. Por favor, asegúrate de activar el proveedor 'Google' en Authentication -> Sign-in method dentro de la consola de Firebase.");
-      } else if (err.code === 'auth/web-storage-unsupported' || err.code === 'auth/iframe-closed-before-user-grant') {
-        console.warn("Falla de Iframe o bloqueo. Iniciando sesión anónima.");
-      }
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (err) {
-      console.error("Error al cerrar sesión: ", err);
-    }
-  };
-
-  const handleSimularPlan = async (planKey) => {
-    if (user) {
-      const userProfileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'subscription');
-      await setDoc(userProfileRef, { plan: planKey, descargasUsadas: 0 }, { merge: true });
-    } else {
-      setUserProfile(prev => ({ ...prev, plan: planKey }));
-      const planData = PLANES[planKey];
-      setCredits(planData.descargasMax);
-    }
-    setShowUpgradeModal(false);
-  };
-
-  // Lógica de Descuento de Créditos Asíncrona (Firebase)
-  const verificarYDescontarCredito = async (callbackAccion) => {
-    const activePlan = PLANES[userProfile.plan || 'libre'];
-    if (activePlan.descargasMax === Infinity) {
-      callbackAccion();
-      return;
-    }
-    if (credits <= 0) {
-      setShowUpgradeModal(true);
-      return;
-    }
-    if (user) {
-      const userProfileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'subscription');
-      await updateDoc(userProfileRef, {
-        descargasUsadas: (userProfile.descargasUsadas || 0) + 1
+    const delayDebounce = setTimeout(() => {
+      const activeEffects = {
+        ...editorEffects,
+        crop: { ...cropBounds }
+      };
+      
+      applyImageEffects(editingSticker, activeEffects, (processedUrl) => {
+        setLocalPreviewUrl(processedUrl);
       });
-    } else {
-      setCredits(prev => Math.max(0, prev - 1));
-    }
-    callbackAccion();
-  };
+    }, 150);
 
-  // Calculadora Financiera de Producción por mm²
-  const calcularCostoStickerCm2 = (anchoMm, altoMm) => {
-    const areaStickerCm2 = (anchoMm / 10) * (altoMm / 10);
-    const areaTotalMetroCm2 = (masterWidth / 10) * 100;
-    const costoPorCm2 = pricePerMeter / areaTotalMetroCm2;
-    return Math.max(1, Math.ceil(areaStickerCm2 * costoPorCm2));
-  };
+    return () => clearTimeout(delayDebounce);
+  }, [editorEffects, cropBounds, editingSticker]);
 
-  const handleAddPlancha = (e) => {
-    e.preventDefault();
-    if (!newPlanchaName.trim()) return;
-    const planchaId = 'plancha_' + Math.random().toString(36).substr(2, 9);
-    const newPlancha = {
-      id: planchaId,
-      name: newPlanchaName.trim(),
-      width: (parseInt(newPlanchaWidth) || 14) * 10,
-      height: (parseInt(newPlanchaHeight) || 20) * 10,
-      spacing: parseInt(newPlanchaSpacing) || 3,
-      safeMargin: parseInt(newPlanchaSafeMargin) || 5,
-      color: newPlanchaColor
+  // Manejo del evento MouseMove/MouseUp global para el arrastre del recuadro de recorte
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!dragType || !cropContainerRef.current) return;
+      e.preventDefault();
+
+      const deltaX = ((e.clientX - dragStart.mouseX) / dragStart.containerWidth) * 100;
+      const deltaY = ((e.clientY - dragStart.mouseY) / dragStart.containerHeight) * 100;
+
+      let newX = dragStart.x;
+      let newY = dragStart.y;
+      let newW = dragStart.w;
+      let newH = dragStart.h;
+
+      const minSize = 8; 
+
+      if (dragType === 'move') {
+        newX = Math.max(0, Math.min(100 - dragStart.w, dragStart.x + deltaX));
+        newY = Math.max(0, Math.min(100 - dragStart.h, dragStart.y + deltaY));
+      } else {
+        if (dragType.includes('e')) {
+          newW = Math.max(minSize, Math.min(100 - dragStart.x, dragStart.w + deltaX));
+        }
+        if (dragType.includes('w')) {
+          const maxLeft = dragStart.x + dragStart.w - minSize;
+          newX = Math.max(0, Math.min(maxLeft, dragStart.x + deltaX));
+          newW = dragStart.w + (dragStart.x - newX);
+        }
+        if (dragType.includes('s')) {
+          newH = Math.max(minSize, Math.min(100 - dragStart.y, dragStart.h + deltaY));
+        }
+        if (dragType.includes('n')) {
+          const maxTop = dragStart.y + dragStart.h - minSize;
+          newY = Math.max(0, Math.min(maxTop, dragStart.y + deltaY));
+          newH = dragStart.h + (dragStart.y - newY);
+        }
+      }
+
+      setCropBounds({
+        top: Math.round(newY),
+        left: Math.round(newX),
+        bottom: Math.round(100 - (newY + newH)),
+        right: Math.round(100 - (newX + newW))
+      });
     };
-    setPlanchas(prev => [...prev, newPlancha]);
-    setSelectedPlanchaForUpload(planchaId);
-    setNewPlanchaName('');
-  };
 
-  const handleAddPliegoMaster = () => {
-    const pliegoId = 'pl_' + Math.random().toString(36).substr(2, 9);
-    const num = pliegos.length + 1;
-    setPliegos(prev => [
-      ...prev,
-      { id: pliegoId, name: `Pliego Producción ${num}`, width: 580, height: 1000 }
-    ]);
-    setActivePliegoIndex(pliegos.length);
-  };
+    const handleMouseUp = () => {
+      setDragType(null);
+    };
 
-  const handleRemovePlancha = (id) => {
-    if (planchas.length <= 1) return;
-    setPlanchas(prev => prev.filter(p => p.id !== id));
-    const firstRemaining = planchas.find(p => p.id !== id);
-    if (firstRemaining) {
-      setImages(prev => prev.map(img => img.planchaId === id ? { ...img, planchaId: firstRemaining.id } : img));
-      setSelectedPlanchaForUpload(firstRemaining.id);
+    if (dragType) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
     }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragType, dragStart]);
+
+  const handleHandleMouseDown = (e, type) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!cropContainerRef.current) return;
+
+    const rect = cropContainerRef.current.getBoundingClientRect();
+    setDragType(type);
+    setDragStart({
+      x: cropBounds.left,
+      y: cropBounds.top,
+      w: 100 - cropBounds.left - cropBounds.right,
+      h: 100 - cropBounds.top - cropBounds.bottom,
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      containerWidth: rect.width,
+      containerHeight: rect.height
+    });
   };
 
   const handleFileChange = (e) => {
@@ -527,36 +214,33 @@ export default function App() {
       reader.onload = (event) => {
         const img = new Image();
         img.onload = () => {
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = img.width;
-          tempCanvas.height = img.height;
-          const tempCtx = tempCanvas.getContext('2d');
-          tempCtx.drawImage(img, 0, 0);
-
-          const trimmedCanvas = trimTransparentCanvas(tempCanvas, 5);
-          const trimmedUrl = trimmedCanvas.toDataURL('image/png');
-          const aspectRatio = trimmedCanvas.width / trimmedCanvas.height;
-
+          const aspectRatio = img.width / img.height;
+          const newImgId = 'img_' + Math.random().toString(36).substr(2, 9);
           const newImg = {
-            id: 'img_' + Math.random().toString(36).substr(2, 9),
+            id: newImgId,
             name: file.name.split('.')[0],
-            previewUrl: trimmedUrl,
-            originalBackupUrl: event.target.result, 
+            previewUrl: event.target.result, 
+            originalUrl: event.target.result, 
             aspectRatio: aspectRatio,
-            originalWidth: trimmedCanvas.width,
-            originalHeight: trimmedCanvas.height,
-            planchaId: selectedPlanchaForUpload, 
+            originalWidth: img.width,
+            originalHeight: img.height,
+            theme: selectedThemeForUpload,
             quantity: 1, 
             sizingMode: 'max', 
-            targetSize: 40, 
-            isBgRemovalActive: false,
-            bgTolerance: 15,
-            haloCleanup: 1, 
-            targetBgColor: { r: 255, g: 255, b: 255 },
-            bgMode: 'contiguous',
-            strokeEnabled: false,
-            strokeWidth: 2,
-            strokeColor: '#ffffff'
+            targetSize: globalTargetSize, 
+            customWidth: globalTargetSize, 
+            customHeight: Math.round(globalTargetSize / aspectRatio), 
+            effects: {
+              removeBg: false,
+              bgTargetColor: '#ffffff',
+              bgTolerance: 40,
+              colorMode: 'original',
+              primaryColor: '#3b82f6',
+              secondaryColor: '#ffffff',
+              strokeWidth: 0,
+              strokeColor: '#ffffff',
+              crop: { top: 0, bottom: 0, left: 0, right: 0 }
+            }
           };
           setImages(prev => [...prev, newImg]);
         };
@@ -582,231 +266,628 @@ export default function App() {
     processFiles(files);
   };
 
-  const removeImage = (id) => {
-    setImages(prev => prev.filter(img => img.id !== id));
-  };
-
-  const updateImageProperty = (id, property, value) => {
-    setImages(prev => prev.map(img => {
-      if (img.id === id) {
-        return { ...img, [property]: value };
-      }
-      return img;
-    }));
-  };
-
   const loadDemoData = () => {
     const demoItems = [
-      { name: 'Sol Argentina (Padding)', planchaId: 'p1', svg: `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg"><rect width="160" height="160" fill="none"/><path d="M80,30 L85,55 L110,60 L85,65 L80,90 L75,65 L50,60 L75,55 Z" fill="#F59E0B" stroke="#000" stroke-width="2"/><circle cx="80" cy="60" r="10" fill="#EC4899"/></svg>` },
-      { name: 'Escudo AFA', planchaId: 'p1', svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="#ffffff"/><path d="M15,20 L85,20 L75,70 L50,90 L25,70 Z" fill="#F59E0B" stroke="#000" stroke-width="3"/><path d="M30,35 L70,35 M30,50 L70,50" fill="none" stroke="#fff" stroke-width="4"/></svg>` },
-      { name: 'Cyber Cat', planchaId: 'p2', svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="#ffffff"/><path d="M15,30 L30,50 L70,50 L85,30 L75,75 L25,75 Z" fill="#10B981" stroke="#000" stroke-width="3"/><circle cx="35" cy="58" r="6" fill="#fff"/><circle cx="65" cy="58" r="6" fill="#fff"/></svg>` }
+      { name: 'Anime Boy Fighter', theme: 't1', svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="none"/><path d="M20,40 C15,40 10,50 10,65 C10,80 20,85 30,80 C35,78 40,70 50,70 C60,70 65,78 70,80 C80,85 90,80 90,65 C90,50 85,40 80,40 Z" fill="#8B5CF6" stroke="#fff" stroke-width="3"/><circle cx="25" cy="55" r="5" fill="#fff"/><circle cx="35" cy="65" r="5" fill="#fff"/><rect x="62" y="52" width="16" height="6" rx="3" fill="#10B981" transform="rotate(-15 70 55)"/><rect x="62" y="62" width="16" height="6" rx="3" fill="#EF4444" transform="rotate(15 70 65)"/></svg>` },
+      { name: 'Neon Cyber Cat', theme: 't3', svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="none"/><path d="M15,30 L30,50 L70,50 L85,30 L75,75 L25,75 Z" fill="#10B981" stroke="#fff" stroke-width="3"/><circle cx="35" cy="58" r="6" fill="#fff"/><circle cx="65" cy="58" r="6" fill="#fff"/><path d="M45,66 Q50,70 55,66" fill="none" stroke="#fff" stroke-width="3"/><polygon points="30,33 22,10 40,30" fill="#EF4444"/><polygon points="70,33 78,10 60,30" fill="#EF4444"/></svg>` },
+      { name: 'Coffee Cup Logo', theme: 't2', svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="none"/><path d="M25,25 L75,25 C75,25 70,75 50,75 C30,75 25,25 25,25 Z" fill="#3B82F6" stroke="#fff" stroke-width="4"/><path d="M73,35 C83,35 83,55 71,55" fill="none" stroke="#fff" stroke-width="4"/><path d="M40,10 Q45,18 40,22 M50,8 Q55,16 50,20 M60,10 Q65,18 60,22" fill="none" stroke="#fff" stroke-width="3"/></svg>` }
     ];
 
-    const loadDemo = async () => {
-      const parsedImages = demoItems.map((item, idx) => {
-        const blob = new Blob([item.svg], { type: 'image/svg+xml' });
-        const url = URL.createObjectURL(blob);
-        return {
-          id: 'demo_' + idx + '_' + Math.random().toString(36).substr(2, 5),
-          name: item.name,
-          previewUrl: url,
-          originalBackupUrl: url,
-          aspectRatio: 1,
-          originalWidth: 500,
-          originalHeight: 500,
-          planchaId: item.planchaId,
-          quantity: 1,
-          sizingMode: 'max',
-          targetSize: 40,
-          isBgRemovalActive: false,
-          bgTolerance: 15,
-          haloCleanup: 1,
-          targetBgColor: { r: 255, g: 255, b: 255 },
-          bgMode: 'contiguous',
-          strokeEnabled: false,
-          strokeWidth: 2,
-          strokeColor: '#ffffff'
-        };
-      });
-      setImages(prev => [...prev, ...parsedImages]);
-    };
-
-    loadDemo();
+    const parsedImages = demoItems.map((item, idx) => {
+      const blob = new Blob([item.svg], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      return {
+        id: 'demo_' + idx + '_' + Math.random().toString(36).substr(2, 5),
+        name: item.name,
+        originalUrl: url,
+        previewUrl: url,
+        aspectRatio: 1,
+        originalWidth: 500,
+        originalHeight: 500,
+        theme: item.theme,
+        quantity: 1,
+        sizingMode: 'max',
+        targetSize: 40,
+        customWidth: 40,
+        customHeight: 40,
+        effects: {
+          removeBg: false,
+          bgTargetColor: '#ffffff',
+          bgTolerance: 40,
+          colorMode: 'original',
+          primaryColor: '#3b82f6',
+          secondaryColor: '#ffffff',
+          strokeWidth: 0,
+          strokeColor: '#ffffff',
+          crop: { top: 0, bottom: 0, left: 0, right: 0 }
+        }
+      };
+    });
+    setImages(prev => [...prev, ...parsedImages]);
   };
 
-  const handleDownloadSinglePng = (img) => {
-    verificarYDescontarCredito(() => {
-      const link = document.createElement('a');
-      link.download = `${img.name}_clean.png`;
-      link.href = img.previewUrl;
-      link.click();
+  // === FUNCIÓN PARA AGREGAR TEMÁTICAS RECONSTRUIDA ===
+  const addTheme = (e) => {
+    e.preventDefault();
+    if (!newThemeName.trim()) return;
+    const newTheme = {
+      id: 't_custom_' + Math.random().toString(36).substr(2, 5),
+      name: newThemeName.trim(),
+      color: newThemeColor,
+      defaultWidth: newThemeWidth * 10,  // Convertido a mm (cm * 10)
+      defaultHeight: newThemeHeight * 10 // Convertido a mm (cm * 10)
+    };
+    setThemes(prev => [...prev, newTheme]);
+    setNewThemeName('');
+  };
+
+  const applyImageEffects = (sticker, effectsConfig, onComplete) => {
+    const tempImg = new Image();
+    tempImg.crossOrigin = "anonymous";
+    tempImg.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      const crop = effectsConfig.crop || { top: 0, bottom: 0, left: 0, right: 0 };
+      const startX = (crop.left / 100) * tempImg.width;
+      const startY = (crop.top / 100) * tempImg.height;
+      const cutWidth = tempImg.width * (1 - (crop.left + crop.right) / 100);
+      const cutHeight = tempImg.height * (1 - (crop.top + crop.bottom) / 100);
+      
+      canvas.width = cutWidth > 0 ? cutWidth : tempImg.width;
+      canvas.height = cutHeight > 0 ? cutHeight : tempImg.height;
+      
+      ctx.drawImage(
+        tempImg, 
+        startX, startY, canvas.width, canvas.height, 
+        0, 0, canvas.width, canvas.height           
+      );
+      
+      let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let data = imgData.data;
+      
+      if (effectsConfig.removeBg) {
+        const hex = effectsConfig.bgTargetColor || '#ffffff';
+        const targetR = parseInt(hex.slice(1, 3), 16);
+        const targetG = parseInt(hex.slice(3, 5), 16);
+        const targetB = parseInt(hex.slice(5, 7), 16);
+        const tolerance = effectsConfig.bgTolerance || 40;
+        
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i+1];
+          const b = data[i+2];
+          
+          const dist = Math.sqrt(
+            Math.pow(r - targetR, 2) +
+            Math.pow(g - targetG, 2) +
+            Math.pow(b - targetB, 2)
+          );
+          
+          if (dist < tolerance) {
+            data[i+3] = 0; 
+          }
+        }
+      }
+      
+      if (effectsConfig.colorMode === 'one-color') {
+        const pColor = effectsConfig.primaryColor || '#ffffff';
+        const pr = parseInt(pColor.slice(1, 3), 16);
+        const pg = parseInt(pColor.slice(3, 5), 16);
+        const pb = parseInt(pColor.slice(5, 7), 16);
+        
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i+3] > 10) {
+            data[i] = pr;
+            data[i+1] = pg;
+            data[i+2] = pb;
+          }
+        }
+      } else if (effectsConfig.colorMode === 'two-color') {
+        const pColor = effectsConfig.primaryColor || '#ffffff';
+        const sColor = effectsConfig.secondaryColor || '#000000';
+        
+        const pr = parseInt(pColor.slice(1, 3), 16);
+        const pg = parseInt(pColor.slice(3, 5), 16);
+        const pb = parseInt(pColor.slice(5, 7), 16);
+        
+        const sr = parseInt(sColor.slice(1, 3), 16);
+        const sg = parseInt(sColor.slice(3, 5), 16);
+        const sb = parseInt(sColor.slice(5, 7), 16);
+        
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i+3] > 10) {
+            const l = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+            if (l > 128) {
+              data[i] = pr; data[i+1] = pg; data[i+2] = pb;
+            } else {
+              data[i] = sr; data[i+1] = sg; data[i+2] = sb;
+            }
+          }
+        }
+      }
+      
+      ctx.putImageData(imgData, 0, 0);
+      
+      if (effectsConfig.strokeWidth > 0) {
+        const strokeCanvas = document.createElement('canvas');
+        const sCtx = strokeCanvas.getContext('2d');
+        
+        strokeCanvas.width = canvas.width;
+        strokeCanvas.height = canvas.height;
+        
+        const maxBorderPx = Math.min(50, effectsConfig.strokeWidth * (Math.max(canvas.width, canvas.height) / 300));
+        const scaleX = (canvas.width - maxBorderPx * 2) / canvas.width;
+        const scaleY = (canvas.height - maxBorderPx * 2) / canvas.height;
+        const scale = Math.min(scaleX, scaleY, 0.98);
+        
+        const drawW = canvas.width * scale;
+        const drawH = canvas.height * scale;
+        const drawX = (canvas.width - drawW) / 2;
+        const drawY = (canvas.height - drawH) / 2;
+        
+        const silCanvas = document.createElement('canvas');
+        const silCtx = silCanvas.getContext('2d');
+        silCanvas.width = canvas.width;
+        silCanvas.height = canvas.height;
+        
+        silCtx.drawImage(canvas, drawX, drawY, drawW, drawH);
+        
+        const silData = silCtx.getImageData(0, 0, silCanvas.width, silCanvas.height);
+        const sD = silData.data;
+        const stColor = effectsConfig.strokeColor || '#ffffff';
+        const str = parseInt(stColor.slice(1, 3), 16);
+        const stg = parseInt(stColor.slice(3, 5), 16);
+        const stb = parseInt(stColor.slice(5, 7), 16);
+        
+        for (let i = 0; i < sD.length; i += 4) {
+          if (sD[i+3] > 10) {
+            sD[i] = str; sD[i+1] = stg; sD[i+2] = stb; sD[i+3] = 255;
+          }
+        }
+        silCtx.putImageData(silData, 0, 0);
+        
+        for (let angle = 0; angle < 360; angle += 22.5) {
+          const dx = Math.cos(angle * Math.PI / 180) * maxBorderPx;
+          const dy = Math.sin(angle * Math.PI / 180) * maxBorderPx;
+          sCtx.drawImage(silCanvas, dx, dy);
+        }
+        
+        sCtx.drawImage(canvas, drawX, drawY, drawW, drawH);
+        
+        onComplete(strokeCanvas.toDataURL('image/png'), canvas.width / canvas.height);
+      } else {
+        onComplete(canvas.toDataURL('image/png'), canvas.width / canvas.height);
+      }
+    };
+    tempImg.src = sticker.originalUrl;
+  };
+
+  const saveEditorChanges = () => {
+    if (!editingSticker) return;
+    
+    setPdfProgress('Aplicando cambios de pre-prensa y recorte...');
+    
+    const activeEffects = {
+      ...editorEffects,
+      crop: { ...cropBounds }
+    };
+
+    applyImageEffects(editingSticker, activeEffects, (processedDataUrl, newAspect) => {
+      setImages(prev => prev.map(img => {
+        if (img.id === editingSticker.id) {
+          return {
+            ...img,
+            name: activeEffects.name,
+            quantity: activeEffects.quantity,
+            targetSize: activeEffects.targetSize,
+            sizingMode: activeEffects.sizingMode,
+            theme: activeEffects.theme,
+            customWidth: activeEffects.customWidth,
+            customHeight: activeEffects.customHeight,
+            previewUrl: processedDataUrl,
+            aspectRatio: newAspect,
+            effects: { ...activeEffects }
+          };
+        }
+        return img;
+      }));
+      setEditingSticker(null);
     });
   };
 
-  const recalculateLayouts = () => {
-    let compiledPlanchas = [];
+  const recalculateLayout = () => {
+    const itemsToPack = [];
+    images.forEach(img => {
+      const qty = parseInt(img.quantity) || 1;
+      let widthMm = 40;
+      let heightMm = 40;
+      const aspect = img.aspectRatio || 1;
+      const sizeValue = parseFloat(img.targetSize) || globalTargetSize;
+      const themePreset = themes.find(t => t.id === img.theme) || { defaultWidth: 400, defaultHeight: 200 };
 
-    planchas.forEach(plancha => {
-      const planchaImages = images.filter(img => img.planchaId === plancha.id);
-      if (planchaImages.length === 0) return;
-
-      const itemsToPack = [];
-      planchaImages.forEach(img => {
-        const qty = parseInt(img.quantity) || 1;
-        
-        let widthMm = 40;
-        let heightMm = 40;
-        const aspect = img.aspectRatio || 1;
-        const sizeValue = parseFloat(img.targetSize) || 40;
-
-        if (img.sizingMode === 'max') {
-          if (aspect >= 1) {
-            widthMm = sizeValue;
-            heightMm = sizeValue / aspect;
-          } else {
-            heightMm = sizeValue;
-            widthMm = sizeValue * aspect;
-          }
+      if (img.sizingMode === 'exact') {
+        widthMm = parseFloat(img.customWidth) || 40;
+        heightMm = parseFloat(img.customHeight) || 40;
+      } else if (img.sizingMode === 'theme-preset') {
+        widthMm = themePreset.defaultWidth / 3; 
+        heightMm = themePreset.defaultHeight / 3;
+      } else if (img.sizingMode === 'max') {
+        if (aspect >= 1) {
+          widthMm = sizeValue;
+          heightMm = sizeValue / aspect;
+        } else {
+          heightMm = sizeValue;
+          widthMm = sizeValue * aspect;
         }
+      } else if (img.sizingMode === 'width') {
+        widthMm = sizeValue;
+        heightMm = sizeValue / aspect;
+      } else if (img.sizingMode === 'height') {
+        heightMm = sizeValue;
+        widthMm = heightMm * aspect;
+      }
 
-        const maxPrintableWidth = plancha.width - (plancha.safeMargin * 2);
-        const maxPrintableHeight = plancha.height - (plancha.safeMargin * 2);
-        if (widthMm > maxPrintableWidth) {
-          widthMm = maxPrintableWidth;
-          heightMm = widthMm / aspect;
-        }
-        if (heightMm > maxPrintableHeight) {
-          heightMm = maxPrintableHeight;
-          widthMm = heightMm * aspect;
-        }
-
-        for (let i = 0; i < qty; i++) {
-          itemsToPack.push({
-            id: `${img.id}_copy_${i}`,
-            parentId: img.id,
-            name: img.name,
-            planchaId: plancha.id,
-            imageSrc: img.previewUrl,
-            width: widthMm,
-            height: heightMm,
-            aspectRatio: aspect
-          });
-        }
-      });
-
-      if (itemsToPack.length === 0) return;
-
-      const packedStickers = packStickersSingleBlock(itemsToPack, plancha.width, plancha.height, plancha.spacing, plancha.safeMargin);
-      
-      if (packedStickers.length > 0) {
-        compiledPlanchas.push({
-          id: plancha.id,
-          name: plancha.name,
-          width: plancha.width,
-          height: plancha.height,
-          color: plancha.color,
-          packedStickers: packedStickers
+      for (let i = 0; i < qty; i++) {
+        itemsToPack.push({
+          id: `${img.id}_copy_${i}`,
+          parentId: img.id,
+          name: img.name,
+          theme: img.theme,
+          imageSrc: img.previewUrl,
+          width: widthMm,
+          height: heightMm,
+          aspectRatio: aspect
         });
       }
     });
 
-    if (compiledPlanchas.length === 0) {
+    if (itemsToPack.length === 0) {
       setPackedSheets([]);
       return;
     }
 
-    const masterRollSheets = packPlanchasOntoMasterRoll(compiledPlanchas, pliegos, 8, 10); 
-    
-    masterRollSheets.forEach(sheet => {
-      sheet.packedPlanchas.forEach(packedPlancha => {
-        packedPlancha.packedStickers.forEach(sticker => {
-          sticker.globalX = packedPlancha.x + sticker.x;
-          sticker.globalY = packedPlancha.y + sticker.y;
-        });
+    if (packingMode === 'theme') {
+      const themesMap = {};
+      itemsToPack.forEach(item => {
+        if (!themesMap[item.theme]) themesMap[item.theme] = [];
+        themesMap[item.theme].push(item);
       });
+
+      const themeBlocksToPack = [];
+
+      Object.keys(themesMap).forEach(themeId => {
+        const themeItems = themesMap[themeId];
+        const themeInfo = themes.find(t => t.id === themeId) || { name: 'General', color: '#6B7280', defaultWidth: 400, defaultHeight: 200 };
+        
+        const blockW = themeInfo.defaultWidth;  
+        const blockH = themeInfo.defaultHeight; 
+        const sortedItems = [...themeItems].sort((a, b) => b.height - a.height);
+        
+        let currentBlockItems = [];
+        let currentShelves = [];
+        let blockIndex = 1;
+
+        const pushBlock = () => {
+          if (currentBlockItems.length > 0) {
+            themeBlocksToPack.push({
+              id: `block_${themeId}_${blockIndex++}`,
+              themeId: themeId,
+              themeName: themeInfo.name,
+              themeColor: themeInfo.color,
+              width: blockW,
+              height: blockH,
+              items: [...currentBlockItems]
+            });
+          }
+        };
+
+        sortedItems.forEach(item => {
+          let placed = false;
+
+          const stickerW = Math.min(item.width, blockW - spacing * 2);
+          const stickerH = Math.min(item.height, blockH - spacing * 2);
+          const adjustedItem = { ...item, width: stickerW, height: stickerH };
+
+          for (const shelf of currentShelves) {
+            if (shelf.currentX + adjustedItem.width <= blockW - spacing && adjustedItem.height <= shelf.height * 1.3) {
+              currentBlockItems.push({
+                ...adjustedItem,
+                relX: shelf.currentX,
+                relY: shelf.y
+              });
+              shelf.currentX += adjustedItem.width + spacing;
+              if (adjustedItem.height > shelf.height) shelf.height = adjustedItem.height;
+              placed = true;
+              break;
+            }
+          }
+
+          if (!placed) {
+            const lastY = currentShelves.length > 0 ? currentShelves[currentShelves.length - 1].y + currentShelves[currentShelves.length - 1].height + spacing : 0;
+            if (lastY + adjustedItem.height <= blockH - spacing) {
+              currentShelves.push({ y: lastY, height: adjustedItem.height, currentX: adjustedItem.width + spacing });
+              currentBlockItems.push({
+                ...adjustedItem,
+                relX: 0,
+                relY: lastY
+              });
+              placed = true;
+            }
+          }
+
+          if (!placed) {
+            pushBlock();
+            currentBlockItems = [];
+            currentShelves = [{ y: 0, height: adjustedItem.height, currentX: adjustedItem.width + spacing }];
+            currentBlockItems.push({
+              ...adjustedItem,
+              relX: 0,
+              relY: 0
+            });
+          }
+        });
+        pushBlock();
+      });
+
+      const maxPrintableW = sheetWidth - (safeMargin * 2);
+      themeBlocksToPack.forEach(b => {
+        if (b.width > maxPrintableW) b.width = maxPrintableW;
+      });
+
+      const sortedBlocks = [...themeBlocksToPack].sort((a, b) => b.height - a.height);
+      const sheets = [{ id: 1, packedBlocks: [], packedItems: [], shelves: [], areaUtilized: 0 }];
+
+      sortedBlocks.forEach(block => {
+        let placed = false;
+        const printableHeight = sheetHeight - (safeMargin * 2);
+
+        for (const sheet of sheets) {
+          for (const shelf of sheet.shelves) {
+            if (shelf.currentX + block.width <= maxPrintableW && block.height <= shelf.height * 1.3) {
+              const absX = shelf.currentX + safeMargin;
+              const absY = shelf.y + safeMargin;
+
+              sheet.packedBlocks.push({ ...block, x: absX, y: absY });
+              block.items.forEach(item => {
+                sheet.packedItems.push({
+                  ...item,
+                  x: absX + item.relX + spacing,
+                  y: absY + item.relY + spacing
+                });
+              });
+
+              shelf.currentX += block.width + spacing;
+              if (block.height > shelf.height) shelf.height = block.height;
+              sheet.areaUtilized += block.width * block.height;
+              placed = true;
+              break;
+            }
+          }
+          if (placed) break;
+
+          const lastY = sheet.shelves.length > 0 ? sheet.shelves[sheet.shelves.length - 1].y + sheet.shelves[sheet.shelves.length - 1].height + spacing : 0;
+          if (lastY + block.height <= printableHeight) {
+            const absX = safeMargin;
+            const absY = lastY + safeMargin;
+
+            sheet.shelves.push({ y: lastY, height: block.height, currentX: block.width + spacing });
+            sheet.packedBlocks.push({ ...block, x: absX, y: absY });
+            block.items.forEach(item => {
+              sheet.packedItems.push({
+                ...item,
+                x: absX + item.relX + spacing,
+                y: absY + item.relY + spacing
+              });
+            });
+
+            sheet.areaUtilized += block.width * block.height;
+            placed = true;
+            break;
+          }
+        }
+
+        if (!placed) {
+          const newSheet = { id: sheets.length + 1, packedBlocks: [], packedItems: [], shelves: [{ y: 0, height: block.height, currentX: block.width + spacing }], areaUtilized: block.width * block.height };
+          const absX = safeMargin;
+          const absY = safeMargin;
+
+          newSheet.packedBlocks.push({ ...block, x: absX, y: absY });
+          block.items.forEach(item => {
+            newSheet.packedItems.push({
+              ...item,
+              x: absX + item.relX + spacing,
+              y: absY + item.relY + spacing
+            });
+          });
+
+          sheets.push(newSheet);
+        }
+      });
+
+      sheets.forEach(s => {
+        const printableArea = maxPrintableW * (sheetHeight - (safeMargin * 2));
+        s.utilizationPercentage = Math.min(100, Math.round((s.areaUtilized / printableArea) * 100));
+      });
+
+      setPackedSheets(sheets);
+      if (activeSheetIndex >= sheets.length) setActiveSheetIndex(0);
+
+    } else {
+      const sortedMixItems = [...itemsToPack].sort((a, b) => b.height - a.height);
+      const tempSheets = runShelfPacker(sortedMixItems, sheetWidth, sheetHeight, spacing, safeMargin);
+      
+      tempSheets.forEach((sheet, idx) => {
+        sheet.id = idx + 1;
+        sheet.themeName = 'Mixto (Optimizado)';
+        sheet.themeColor = '#10B981';
+      });
+
+      setPackedSheets(tempSheets);
+      if (activeSheetIndex >= tempSheets.length) setActiveSheetIndex(0);
+    }
+  };
+
+  const runShelfPacker = (items, totalWidth, totalHeight, margin, safe) => {
+    const printableWidth = totalWidth - (safe * 2);
+    const printableHeight = totalHeight - (safe * 2);
+
+    const sheets = [];
+    const createNewSheet = (sheetNum) => ({
+      id: sheetNum,
+      packedItems: [],
+      shelves: [],
+      areaUtilized: 0
     });
 
-    setPackedSheets(masterRollSheets);
-    if (activePliegoIndex >= masterRollSheets.length) {
-      setActivePliegoIndex(0);
-    }
+    sheets.push(createNewSheet(1));
+
+    items.forEach(item => {
+      let placed = false;
+
+      for (const sheet of sheets) {
+        for (const shelf of sheet.shelves) {
+          if (shelf.currentX + item.width <= printableWidth && item.height <= shelf.height * 1.3) {
+            sheet.packedItems.push({
+              ...item,
+              x: shelf.currentX + safe,
+              y: shelf.y + safe,
+            });
+            shelf.currentX += item.width + margin;
+            if (item.height > shelf.height) {
+              shelf.height = item.height;
+            }
+            sheet.areaUtilized += item.width * item.height;
+            placed = true;
+            break;
+          }
+        }
+        if (placed) break;
+
+        const lastShelfY = sheet.shelves.length > 0
+          ? sheet.shelves[sheet.shelves.length - 1].y + sheet.shelves[sheet.shelves.length - 1].height + margin
+          : 0;
+
+        if (lastShelfY + item.height <= printableHeight) {
+          const newShelf = {
+            y: lastShelfY,
+            height: item.height,
+            currentX: item.width + margin
+          };
+          sheet.shelves.push(newShelf);
+          sheet.packedItems.push({
+            ...item,
+            x: safe,
+            y: lastShelfY + safe
+          });
+          sheet.areaUtilized += item.width * item.height;
+          placed = true;
+          break;
+        }
+      }
+
+      if (!placed) {
+        const newSheet = createNewSheet(sheets.length + 1);
+        const firstShelf = {
+          y: 0,
+          height: item.height,
+          currentX: item.width + margin
+        };
+        newSheet.shelves.push(firstShelf);
+        newSheet.packedItems.push({
+          ...item,
+          x: safe,
+          y: safe
+        });
+        newSheet.areaUtilized += item.width * item.height;
+        sheets.push(newSheet);
+      }
+    });
+
+    sheets.forEach(sheet => {
+      const printableArea = printableWidth * printableHeight;
+      sheet.utilizationPercentage = Math.min(100, Math.round((sheet.areaUtilized / printableArea) * 100));
+    });
+
+    return sheets;
   };
 
   const generatePDF = async () => {
     if (packedSheets.length === 0) return;
     setIsGeneratingPdf(true);
-    setPdfProgress('Iniciando PDF....');
+    setPdfProgress('Iniciando PDF...');
 
     try {
       const { jsPDF } = window.jspdf;
-
-      const firstSheet = packedSheets[0];
+      const orientation = sheetWidth > sheetHeight ? 'landscape' : 'portrait';
+      
       const doc = new jsPDF({
-        orientation: firstSheet.width > firstSheet.height ? 'landscape' : 'portrait',
+        orientation: orientation,
         unit: 'mm',
-        format: [firstSheet.width, firstSheet.height]
+        format: [sheetWidth, sheetHeight]
       });
 
       for (let sIdx = 0; sIdx < packedSheets.length; sIdx++) {
         const sheet = packedSheets[sIdx];
-        setPdfProgress(`Procesando Rollo Master ${sIdx + 1} de ${packedSheets.length}...`);
+        setPdfProgress(`Procesando Plancha ${sIdx + 1} de ${packedSheets.length}...`);
 
         if (sIdx > 0) {
-          doc.addPage([sheet.width, sheet.height], sheet.width > sheet.height ? 'landscape' : 'portrait');
+          doc.addPage([sheetWidth, sheetHeight]);
         }
 
         if (showCutMarks) {
-          doc.setDrawColor(220, 220, 220);
-          doc.setLineWidth(0.3);
-          doc.rect(sheet.safeMargin, sheet.safeMargin, sheet.width - (sheet.safeMargin * 2), sheet.height - (sheet.safeMargin * 2), 'S');
+          doc.setDrawColor(200, 200, 200);
+          doc.setLineWidth(0.2);
+          doc.rect(safeMargin, safeMargin, sheetWidth - (safeMargin * 2), sheetHeight - (safeMargin * 2), 'S');
           
           doc.setFont('Helvetica', 'normal');
           doc.setFontSize(8);
           doc.setTextColor(150, 150, 150);
-          doc.text(`DTF UV MASTER ROLL | Plancha ${sIdx + 1}/${packedSheets.length}`, sheet.safeMargin, sheet.safeMargin - 3);
-          doc.text(`Medida Real: ${sheet.width / 10}x${sheet.height / 10} cm`, sheet.width - sheet.safeMargin - 45, sheet.safeMargin - 3);
+          doc.text(`DTF UV PLOTTER PLANNER | Plancha ${sIdx + 1}/${packedSheets.length}`, safeMargin, safeMargin - 3);
         }
 
-        sheet.packedPlanchas.forEach(plancha => {
-          if (showCutMarks) {
-            const rgb = hexToRgb(plancha.color) || { r: 150, g: 150, b: 150 };
-            doc.setDrawColor(rgb.r, rgb.g, rgb.b);
-            doc.setLineWidth(0.2);
+        if (packingMode === 'theme' && sheet.packedBlocks) {
+          sheet.packedBlocks.forEach(block => {
+            doc.setDrawColor(180, 180, 180);
+            doc.setLineWidth(0.3);
             doc.setLineDashPattern([2, 2], 0);
-            doc.rect(plancha.x, plancha.y, plancha.width, plancha.height, 'S');
+            doc.rect(block.x, block.y, block.width, block.height, 'S');
             
             doc.setFont('Helvetica', 'bold');
             doc.setFontSize(7);
-            doc.setTextColor(rgb.r, rgb.g, rgb.b);
-            doc.text(`${plancha.name} (${plancha.width/10}x${plancha.height/10} cm)`, plancha.x + 2, plancha.y + 4);
-          }
-
-          plancha.packedStickers.forEach(sticker => {
-            try {
-              doc.addImage(
-                sticker.imageSrc, 
-                'PNG', 
-                sticker.globalX, 
-                sticker.globalY, 
-                sticker.width, 
-                sticker.height, 
-                undefined, 
-                'FAST'
-              );
-            } catch (e) {
-              console.error("Error al incrustar sticker en PDF: ", e);
-            }
+            doc.setTextColor(130, 130, 130);
+            doc.text(`${block.themeName.toUpperCase()} [${block.width/10}x${block.height/10} cm]`, block.x + 2, block.y + 4);
           });
-        });
+          doc.setLineDashPattern([], 0);
+        }
+
+        for (let iIdx = 0; iIdx < sheet.packedItems.length; iIdx++) {
+          const item = sheet.packedItems[iIdx];
+          try {
+            doc.addImage(
+              item.imageSrc, 
+              'PNG', 
+              item.x, 
+              item.y, 
+              item.width, 
+              item.height, 
+              undefined, 
+              'FAST'
+            );
+          } catch (e) {
+            console.error("Error al incrustar sticker en PDF: ", e);
+          }
+        }
       }
 
       setPdfProgress('Generando descarga...');
+      
       const pdfBlob = doc.output('blob');
       const blobUrl = URL.createObjectURL(pdfBlob);
       
       const downloadLink = document.createElement('a');
       downloadLink.href = blobUrl;
-      downloadLink.download = `Pliego_DTF_UV_${masterWidth/10}x${masterHeight/10}cm.pdf`;
+      downloadLink.download = `Planchas_DTF_UV_${sheetWidth / 10}x${sheetHeight / 10}cm.pdf`;
       document.body.appendChild(downloadLink);
       downloadLink.click();
       
@@ -816,946 +897,416 @@ export default function App() {
       }, 150);
 
     } catch (error) {
-      console.error("Error generando PDF: ", error);
+      console.error(error);
+      setPdfProgress('Error al generar PDF.');
+      setTimeout(() => setPdfProgress(''), 4000);
     } finally {
       setIsGeneratingPdf(false);
       setPdfProgress('');
     }
   };
 
-  const handleDownloadPliegoPng = () => {
-    if (!activeSheet) return;
-    verificarYDescontarCredito(() => {
-      const exportCanvas = document.createElement('canvas');
-      exportCanvas.width = activeSheet.width * 2.83464; 
-      exportCanvas.height = activeSheet.height * 2.83464;
-      const ctx = exportCanvas.getContext('2d');
-      
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+  const scale = (zoomLevel / 100) * 1.2;
 
-      if (showCutMarks) {
-        ctx.strokeStyle = "#dddddd";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(activeSheet.safeMargin * 2.83464, activeSheet.safeMargin * 2.83464, (activeSheet.width - activeSheet.safeMargin * 2) * 2.83464, (activeSheet.height - activeSheet.safeMargin * 2) * 2.83464);
-      }
+  let currentBaseWidth = editorEffects.targetSize;
+  let currentBaseHeight = editorEffects.targetSize / (editingSticker?.aspectRatio || 1);
 
-      activeSheet.packedPlanchas.forEach(pl => {
-        const px = pl.x * 2.83464;
-        const py = pl.y * 2.83464;
-        const pw = pl.width * 2.83464;
-        const ph = pl.height * 2.83464;
-        
-        ctx.strokeStyle = pl.color;
-        ctx.setLineDash([4, 4]);
-        ctx.strokeRect(px, py, pw, ph);
-        ctx.setLineDash([]);
-      });
+  const themePresetForCalc = themes.find(t => t.id === editorEffects.theme) || { defaultWidth: 400, defaultHeight: 200 };
 
-      let loadedCount = 0;
-      const stickers = activeSheet.packedPlanchas.flatMap(p => p.packedStickers);
-      
-      if (stickers.length === 0) {
-        const link = document.createElement('a');
-        link.download = `pliego_master_${activeSheet.id || 1}_${Date.now()}.png`;
-        link.href = exportCanvas.toDataURL('image/png');
-        link.click();
-        return;
-      }
-
-      stickers.forEach(st => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => {
-          const sx = st.globalX * 2.83464;
-          const sy = st.globalY * 2.83464;
-          const sw = st.width * 2.83464;
-          const sh = st.height * 2.83464;
-          ctx.drawImage(img, sx, sy, sw, sh);
-          
-          loadedCount++;
-          if (loadedCount === stickers.length) {
-            const link = document.createElement('a');
-            link.download = `pliego_master_${activeSheet.id || 1}_${Date.now()}.png`;
-            link.href = exportCanvas.toDataURL('image/png');
-            link.click();
-          }
-        };
-        img.onerror = () => {
-          loadedCount++;
-          if (loadedCount === stickers.length) {
-            const link = document.createElement('a');
-            link.download = `pliego_master_${activeSheet.id || 1}_${Date.now()}.png`;
-            link.href = exportCanvas.toDataURL('image/png');
-            link.click();
-          }
-        };
-        img.src = st.imageSrc;
-      });
-    });
-  };
-
-  // Motor Gráfico de Aislamiento de Canales
-  const applyImageEdits = () => {
-    const tempImg = new Image();
-    tempImg.crossOrigin = "anonymous";
-    tempImg.onload = () => {
-      const canvas = previewCanvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      
-      const procCanvas = document.createElement('canvas');
-      procCanvas.width = tempImg.naturalWidth || tempImg.width;
-      procCanvas.height = tempImg.naturalHeight || tempImg.height;
-      const procCtx = procCanvas.getContext('2d');
-      procCtx.drawImage(tempImg, 0, 0);
-      
-      let width = procCanvas.width;
-      let height = procCanvas.height;
-
-      // --- 1. PRE-FILTRO DE RECORTE (CROP MANUAL) ---
-      if (cropEnabled) {
-        const pX = (cropBox.x / 100) * width;
-        const pY = (cropBox.y / 100) * height;
-        const pW = (cropBox.width / 100) * width;
-        const pH = (cropBox.height / 100) * height;
-
-        if (pW > 4 && pH > 4) {
-          const cropCanvas = document.createElement('canvas');
-          cropCanvas.width = pW;
-          cropCanvas.height = pH;
-          const cropCtx = cropCanvas.getContext('2d');
-          cropCtx.drawImage(procCanvas, pX, pY, pW, pH, 0, 0, pW, pH);
-
-          procCanvas.width = pW;
-          procCanvas.height = pH;
-          width = pW;
-          height = pH;
-          procCtx.drawImage(cropCanvas, 0, 0);
-        }
-      }
-
-      // --- 2. DOBLE BORRADO SIMULTÁNEO ---
-      if (isBgRemovalActive) {
-        const imgData = procCtx.getImageData(0, 0, width, height);
-        const data = imgData.data;
-        const threshold = (bgTolerance / 100) * 442;
-        const removedMask = new Uint8Array(width * height);
-
-        if (bgMode === 'contiguous') {
-          const visited = new Uint8Array(width * height);
-          const queue = new Int32Array(width * height); 
-          let head = 0;
-          let tail = 0;
-
-          const startX = Math.floor(clickCoords.x);
-          const startY = Math.floor(clickCoords.y);
-
-          if (startX >= 0 && startX < width && startY >= 0 && startY < height) {
-            queue[tail++] = startY * width + startX;
-            visited[startY * width + startX] = 1;
-          }
-
-          while (head < tail) {
-            const idx = queue[head++];
-            const currX = idx % width;
-            const currY = Math.floor(idx / width);
-            
-            removedMask[idx] = 1;
-
-            const neighbors = [
-              [currX + 1, currY], [currX - 1, currY],
-              [currX, currY + 1], [currX, currY - 1]
-            ];
-
-            for (const [nx, ny] of neighbors) {
-              if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                const nIdx = ny * width + nx;
-                if (!visited[nIdx]) {
-                  visited[nIdx] = 1;
-                  const nDataIdx = nIdx * 4;
-                  const nr = data[nDataIdx];
-                  const ng = data[nDataIdx + 1];
-                  const nb = data[nDataIdx + 2];
-                  const na = data[nDataIdx + 3];
-
-                  if (na > 0) { 
-                    const d1 = Math.sqrt(Math.pow(nr - colorBorrar1.r, 2) + Math.pow(ng - colorBorrar1.g, 2) + Math.pow(nb - colorBorrar1.b, 2));
-                    const d2 = isColor2Enabled ? Math.sqrt(Math.pow(nr - colorBorrar2.r, 2) + Math.pow(ng - colorBorrar2.g, 2) + Math.pow(nb - colorBorrar2.b, 2)) : Infinity;
-                    
-                    if (d1 < threshold || d2 < threshold) {
-                      queue[tail++] = nIdx;
-                    }
-                  }
-                }
-              }
-            }
-          }
-        } else {
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
-            if (a === 0) continue;
-            
-            const d1 = Math.sqrt(Math.pow(r - colorBorrar1.r, 2) + Math.pow(g - colorBorrar1.g, 2) + Math.pow(b - colorBorrar1.b, 2));
-            const d2 = isColor2Enabled ? Math.sqrt(Math.pow(r - colorBorrar2.r, 2) + Math.pow(g - colorBorrar2.g, 2) + Math.pow(b - colorBorrar2.b, 2)) : Infinity;
-
-            if (d1 < threshold || d2 < threshold) {
-              removedMask[i / 4] = 1;
-            }
-          }
-        }
-
-        for (let i = 0; i < width * height; i++) {
-          if (removedMask[i] === 1) {
-            data[i * 4 + 3] = 0;
-          }
-        }
-
-        // --- 3. CONTRACCIÓN DE HALO ---
-        if (haloCleanup > 0) {
-          const originalAlpha = new Uint8Array(width * height);
-          for (let i = 0; i < width * height; i++) {
-            originalAlpha[i] = data[i * 4 + 3];
-          }
-
-          const radius = Math.min(5, haloCleanup);
-
-          for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-              const idx = y * width + x;
-              if (originalAlpha[idx] === 0) continue;
-
-              let minAlphaInNeighborhood = 255;
-
-              for (let dy = -radius; dy <= radius; dy++) {
-                const ny = y + dy;
-                if (ny >= 0 && ny < height) {
-                  for (let dx = -radius; dx <= radius; dx++) {
-                    if (dx*dx + dy*dy <= radius*radius) {
-                      const nx = x + dx;
-                      if (nx >= 0 && nx < width) {
-                        const nIdx = ny * width + nx;
-                        if (originalAlpha[nIdx] < minAlphaInNeighborhood) {
-                          minAlphaInNeighborhood = originalAlpha[nIdx];
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-
-              data[idx * 4 + 3] = minAlphaInNeighborhood;
-            }
-          }
-        }
-
-        procCtx.putImageData(imgData, 0, 0);
-      }
-      
-      let strokePx = 0;
-      if (strokeEnabled && strokeWidth > 0) {
-        const mmToPxRatio = procCanvas.width / (editingImage.targetSize || 40);
-        strokePx = Math.round(strokeWidth * mmToPxRatio);
-      }
-      
-      canvas.width = procCanvas.width + (strokePx * 2);
-      canvas.height = procCanvas.height + (strokePx * 2);
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      const centerCanvas = document.createElement('canvas');
-      centerCanvas.width = canvas.width;
-      centerCanvas.height = canvas.height;
-      const centerCtx = centerCanvas.getContext('2d');
-      centerCtx.drawImage(procCanvas, strokePx, strokePx);
-      
-      if (strokeEnabled && strokePx > 0) {
-        const silhouetteCanvas = document.createElement('canvas');
-        silhouetteCanvas.width = canvas.width;
-        silhouetteCanvas.height = canvas.height;
-        const silCtx = silhouetteCanvas.getContext('2d');
-        silCtx.drawImage(centerCanvas, 0, 0);
-        silCtx.globalCompositeOperation = 'source-in';
-        silCtx.fillStyle = strokeColor;
-        silCtx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        const steps = 36;
-        for (let i = 0; i < steps; i++) {
-          const angle = (i / steps) * Math.PI * 2;
-          const dx = Math.cos(angle) * strokePx;
-          const dy = Math.sin(angle) * strokePx;
-          ctx.drawImage(silhouetteCanvas, dx, dy);
-        }
-      }
-      
-      ctx.drawImage(centerCanvas, 0, 0);
-      
-      const resultUrl = canvas.toDataURL('image/png');
-      setRemovalPreviewUrl(resultUrl);
-      setEditedAspectRatio(canvas.width / canvas.height);
-    };
-    tempImg.src = originalBackupUrl;
-  };
-
-  const handleCanvasClick = (e) => {
-    const canvas = previewCanvasRef.current;
-    if (!canvas) return;
-    
-    const clickedImg = e.currentTarget;
-    const rect = clickedImg.getBoundingClientRect();
-    
-    const x = ((e.clientX - rect.left) / rect.width) * canvas.width;
-    const y = ((e.clientY - rect.top) / rect.height) * canvas.height;
-    
-    const ctx = canvas.getContext('2d');
-    const pixel = ctx.getImageData(x, y, 1, 1).data;
-    
-    if (activeColorSlot === 1) {
-      setColorBorrar1({ r: pixel[0], g: pixel[1], b: pixel[2] });
+  if (editorEffects.sizingMode === 'exact') {
+    currentBaseWidth = editorEffects.customWidth;
+    currentBaseHeight = editorEffects.customHeight;
+  } else if (editorEffects.sizingMode === 'theme-preset') {
+    currentBaseWidth = themePresetForCalc.defaultWidth / 3;
+    currentBaseHeight = themePresetForCalc.defaultHeight / 3;
+  } else if (editorEffects.sizingMode === 'width') {
+    currentBaseWidth = editorEffects.targetSize;
+    currentBaseHeight = editorEffects.targetSize / (editingSticker?.aspectRatio || 1);
+  } else if (editorEffects.sizingMode === 'height') {
+    currentBaseHeight = editorEffects.targetSize;
+    currentBaseWidth = editorEffects.targetSize * (editingSticker?.aspectRatio || 1);
+  } else if (editorEffects.sizingMode === 'max') {
+    const asp = editingSticker?.aspectRatio || 1;
+    if (asp >= 1) {
+      currentBaseWidth = editorEffects.targetSize;
+      currentBaseHeight = editorEffects.targetSize / asp;
     } else {
-      setColorBorrar2({ r: pixel[0], g: pixel[1], b: pixel[2] });
+      currentBaseHeight = editorEffects.targetSize;
+      currentBaseWidth = editorEffects.targetSize * asp;
     }
-    setClickCoords({ x, y });
-    setIsBgRemovalActive(true);
-  };
+  }
 
-  const saveTransparentImage = () => {
-    if (!editingImage) return;
-
-    const finalCanvas = document.createElement('canvas');
-    finalCanvas.width = previewCanvasRef.current.width;
-    finalCanvas.height = previewCanvasRef.current.height;
-    const finalCtx = finalCanvas.getContext('2d');
-
-    const tempImg = new Image();
-    tempImg.onload = () => {
-      finalCtx.drawImage(tempImg, 0, 0);
-      
-      const trimmed = trimTransparentCanvas(finalCanvas, 5);
-      const croppedUrl = trimmed.toDataURL('image/png');
-      const newAspect = trimmed.width / trimmed.height;
-
-      setImages(prev => prev.map(img => {
-        if (img.id === editingImage.id) {
-          return {
-            ...img,
-            previewUrl: croppedUrl,
-            aspectRatio: newAspect,
-            isBgRemovalActive,
-            bgTolerance,
-            haloCleanup,
-            colorBorrar1,
-            colorBorrar2,
-            isColor2Enabled,
-            cropEnabled,
-            cropBox,
-            bgMode,
-            strokeEnabled,
-            strokeWidth,
-            strokeColor
-          };
-        }
-        return img;
-      }));
-      setEditingImage(null);
-    };
-    tempImg.src = removalPreviewUrl;
-  };
-
-  const handleCropMouseDown = (e) => {
-    e.stopPropagation();
-    setIsDraggingCrop(true);
-    dragStartOffset.current = {
-      x: e.clientX,
-      y: e.clientY
-    };
-  };
-
-  const handleCropMouseMove = (e) => {
-    if (!isDraggingCrop) return;
-    const dx = ((e.clientX - dragStartOffset.current.x) / window.innerWidth) * 100;
-    const dy = ((e.clientY - dragStartOffset.current.y) / window.innerHeight) * 100;
-
-    setCropBox(prev => {
-      const newWidth = Math.max(10, Math.min(100 - prev.x, prev.width + dx));
-      const newHeight = Math.max(10, Math.min(100 - prev.y, prev.height + dy));
-      return {
-        ...prev,
-        width: newWidth,
-        height: newHeight
-      };
-    });
-    dragStartOffset.current = { x: e.clientX, y: e.clientY };
-  };
-
-  const restoreOriginalImage = () => {
-    if (!editingImage) return;
-    
-    const tempImg = new Image();
-    tempImg.onload = () => {
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = tempImg.width;
-      tempCanvas.height = tempImg.height;
-      const tempCtx = tempCanvas.getContext('2d');
-      tempCtx.drawImage(tempImg, 0, 0);
-
-      const trimmed = trimTransparentCanvas(tempCanvas, 5);
-      const trimmedUrl = trimmed.toDataURL('image/png');
-      const newAspect = trimmed.width / trimmed.height;
-
-      setImages(prev => prev.map(img => {
-        if (img.id === editingImage.id) {
-          return {
-            ...img,
-            previewUrl: trimmedUrl,
-            aspectRatio: newAspect,
-            isBgRemovalActive: false,
-            strokeEnabled: false,
-            cropEnabled: false
-          };
-        }
-        return img;
-      }));
-      setEditingImage(null);
-    };
-    tempImg.src = originalBackupUrl;
-  };
-
-  const activeSheet = packedSheets[activePliegoIndex];
-  const activePlanchaWidth = activeSheet ? activeSheet.width : 580;
-  const activePlanchaHeight = activeSheet ? activeSheet.height : 1000;
-
-  const totalMetersUsed = packedSheets.reduce((acc, sheet) => acc + (sheet.height / 1000), 0).toFixed(2);
-  const totalCostEstimate = (parseFloat(totalMetersUsed) * pricePerMeter).toLocaleString('es-ES', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2
-  });
-
-  const scale = (zoomLevel / 100) * 0.85;
+  const calculatedCropWidthCm = (currentBaseWidth / 10) * (1 - (cropBounds.left + cropBounds.right) / 100);
+  const calculatedCropHeightCm = (currentBaseHeight / 10) * (1 - (cropBounds.top + cropBounds.bottom) / 100);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans antialiased flex flex-col">
       
-      {/* HEADER DE LA APP */}
+      {/* HEADER PRINCIPAL */}
       <header className="bg-slate-950 border-b border-slate-800 px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
-          <div className="bg-linear-to-tr from-violet-600 to-cyan-500 p-2.5 rounded-xl shadow-inner animate-pulse">
+          <div className="bg-gradient-to-tr from-violet-600 to-cyan-500 p-2.5 rounded-xl shadow-inner">
             <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </div>
           <div>
-            <h1 className="text-xl font-black tracking-tight bg-linear-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
+            <h1 className="text-xl font-black tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
               Smart DTF UV Pro Layout
             </h1>
-            <p className="text-xs text-slate-400 font-medium">Anidamiento Jerárquico de Planillas en Bobina de Impresión</p>
+            <p className="text-xs text-slate-400 font-medium font-mono">Pre-prensa, Distribución Óptima y Grilla Unificada de Stickers</p>
           </div>
         </div>
         
-        {/* Controles de Firebase Auth e Perfil */}
-        <div className="flex flex-wrap gap-4 items-center">
-          {user && !user.isAnonymous ? (
-            <div className="flex items-center gap-3 bg-slate-900/50 border border-slate-800 px-3.5 py-1.5 rounded-2xl">
-              {user.photoURL && (
-                <img src={user.photoURL} alt={user.displayName} className="w-7 h-7 rounded-full border border-slate-700" />
-              )}
-              <div className="text-xs">
-                <p className="font-bold text-slate-200 leading-none">{user.displayName}</p>
-                <button onClick={handleLogout} className="text-[10px] text-red-400 hover:underline mt-0.5 block leading-none cursor-pointer">Cerrar Sesión</button>
-              </div>
-            </div>
-          ) : (
-            <button 
-              onClick={handleLoginGoogle}
-              className="bg-slate-900 hover:bg-slate-850 text-slate-200 border border-slate-800 px-4 py-2 rounded-2xl text-xs font-bold transition-all shadow-sm flex items-center gap-2 cursor-pointer"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12.24 10.285V13.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.866-3.577-7.866-8s3.536-8 7.866-8c2.46 0 4.105 1.025 5.047 1.926l2.427-2.334C17.955 2.192 15.34 1 12.24 1 6.12 1 1.16 6.12 1 12.24s5.12 11.24 11.24 11.24c6.38 0 10.62-4.474 10.62-10.782 0-.728-.08-1.284-.176-1.848H12.24z"/>
-              </svg>
-              <span>Ingresar con Google</span>
-            </button>
-          )}
-
-          {/* Métricas Generales */}
-          <div className="flex flex-wrap gap-3 items-center text-sm">
-            <button 
-              onClick={() => setShowUpgradeModal(true)}
-              className="bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black px-3.5 py-1.5 rounded-xl text-xs transition-all shadow-sm shrink-0 cursor-pointer"
-            >
-              👑 {PLANES[userProfile.plan || 'libre'].nombre}
-            </button>
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
-              <span>Créditos: <strong>{credits === Infinity ? '∞' : credits}</strong></span>
-            </div>
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-violet-400"></span>
-              <span>Pliegos Master: <strong>{packedSheets.length}</strong></span>
-            </div>
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-              <span>Presupuesto: <strong>{currencySymbol}{totalCostEstimate}</strong></span>
-            </div>
+        <div className="flex flex-wrap gap-3 items-center text-sm">
+          <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+            <span>Planchas: <strong>{packedSheets.length}</strong></span>
+          </div>
+          <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-violet-400"></span>
+            <span>Uso de Film: <strong>{totalMetersUsed} m</strong></span>
+          </div>
+          <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+            <span>Precio Est.: <strong>{currencySymbol}{totalCostEstimate}</strong></span>
           </div>
         </div>
       </header>
 
-      {/* CUERPO PRINCIPAL */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         
-        {/* PANEL IZQUIERDO DE ACCIONES CON SECCIONES COLAPSABLES */}
-        <aside className="w-full lg:w-105 bg-slate-950 border-r border-slate-800 flex flex-col overflow-y-auto max-h-[calc(100vh-80px)] shrink-0">
+        {/* PANEL IZQUIERDO: CONFIGURACIONES Y LISTADO EN GRILLA DE STICKERS */}
+        <aside className="w-full lg:w-[440px] bg-slate-950 border-r border-slate-800 p-5 flex flex-col gap-5 overflow-y-auto max-h-[calc(100vh-80px)]">
           
-          <div className="p-4 flex flex-col gap-4">
-
-            {/* SECCIÓN COLAPSABLE 1: CONFIGURACIÓN GLOBAL */}
-            <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl overflow-hidden transition-all">
+          {/* 1. CONFIGURACIÓN DE PELÍCULA */}
+          <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-inner">
+            <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <svg className="w-4 h-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
+              1. Configuración de Película
+            </h3>
+            
+            <div className="grid grid-cols-2 gap-2 mt-1">
               <button 
-                onClick={() => setIsConfigOpen(!isConfigOpen)}
-                className="w-full px-4 py-3 bg-slate-900/80 hover:bg-slate-900 flex justify-between items-center text-left text-xs font-bold uppercase tracking-wider text-slate-300 focus:outline-none"
+                onClick={() => { setSheetHeight(1000); }}
+                className={`py-2 px-3 rounded-lg border font-semibold text-xs transition-all ${
+                  sheetHeight === 1000 
+                    ? 'bg-cyan-500/10 border-cyan-500 text-cyan-300 shadow-md' 
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
               >
-                <span className="flex items-center gap-2">
-                  <svg className="w-4 h-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-                  1. Medidas de Pliegos y Costos
-                </span>
-                <span className={`text-slate-500 font-bold transform transition-transform duration-250 ${isConfigOpen ? 'rotate-180' : ''}`}>▼</span>
+                58 cm x 1 Metro
               </button>
-              
-              {isConfigOpen && (
-                <div className="p-4 border-t border-slate-800/60 flex flex-col gap-3 text-xs bg-slate-900/20">
-                  
-                  {/* RESTAURACIÓN DEL GESTOR DE HOJAS / PLIEGOS */}
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center bg-slate-950/60 p-2 rounded-lg">
-                      <span className="font-bold text-slate-300">Páginas de Pliegos / Lienzo</span>
-                      <button 
-                        type="button"
-                        onClick={handleAddPliegoMaster}
-                        className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer focus:outline-none"
-                      >
-                        + Agregar Pliego
-                      </button>
-                    </div>
-                    
-                    <div className="flex flex-col gap-2 max-h-36 overflow-y-auto pr-1">
-                      {pliegos.map((pl, idx) => (
-                        <div 
-                          key={pl.id}
-                          className={`p-2.5 rounded-xl border flex flex-col gap-1 transition-all ${
-                            activePliegoIndex === idx 
-                              ? 'border-cyan-500 bg-cyan-950/20 shadow-md' 
-                              : 'border-slate-800 bg-slate-900/40 hover:border-slate-700'
-                          }`}
-                        >
-                          <div className="flex justify-between items-center">
-                            <input 
-                              type="text"
-                              value={pl.name}
-                              onChange={(e) => {
-                                const newName = e.target.value;
-                                setPliegos(prev => prev.map((item, pIdx) => pIdx === idx ? { ...item, name: newName } : item));
-                              }}
-                              className="bg-transparent border-none text-xs font-bold text-white focus:outline-none focus:ring-0 w-2/3"
-                            />
-                            <div className="flex items-center gap-1.5">
-                              {pliegos.length > 1 && (
-                                <button 
-                                  onClick={() => {
-                                    setPliegos(prev => prev.filter((_, pIdx) => pIdx !== idx));
-                                    if (activePliegoIndex >= idx) {
-                                      setActivePliegoIndex(Math.max(0, idx - 1));
-                                    }
-                                  }}
-                                  className="text-red-400 hover:text-red-300 text-[10px] focus:outline-none cursor-pointer"
-                                  title="Eliminar Pliego"
-                                >
-                                  ✕
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400 font-mono mt-1">
-                            <div className="flex items-center gap-1">
-                              <span>W:</span>
-                              <input 
-                                type="number"
-                                value={pl.width / 10}
-                                onChange={(e) => {
-                                  const newW = (parseFloat(e.target.value) || 10) * 10;
-                                  setPliegos(prev => prev.map((item, pIdx) => pIdx === idx ? { ...item, width: newW } : item));
-                                }}
-                                className="bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-center text-white w-full"
-                              />
-                              <span>cm</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span>H:</span>
-                              <input 
-                                type="number"
-                                value={pl.height / 10}
-                                onChange={(e) => {
-                                  const newH = (parseFloat(e.target.value) || 10) * 10;
-                                  setPliegos(prev => prev.map((item, pIdx) => pIdx === idx ? { ...item, height: newH } : item));
-                                }}
-                                className="bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-center text-white w-full"
-                              />
-                              <span>cm</span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+              <button 
+                onClick={() => { setSheetHeight(500); }}
+                className={`py-2 px-3 rounded-lg border font-semibold text-xs transition-all ${
+                  sheetHeight === 500 
+                    ? 'bg-cyan-500/10 border-cyan-500 text-cyan-300 shadow-md' 
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                58 cm x 50 cm
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs mt-1">
+              <div>
+                <label className="text-slate-400 block mb-1">Ancho Imprimible (mm)</label>
+                <input 
+                  type="number" 
+                  value={sheetWidth} 
+                  onChange={(e) => setSheetWidth(parseInt(e.target.value) || 580)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-slate-400 block mb-1">Márgen Seguro (mm)</label>
+                <input 
+                  type="number" 
+                  value={safeMargin} 
+                  onChange={(e) => setSafeMargin(parseInt(e.target.value) || 0)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
+                  min="0"
+                  max="50"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="text-slate-400 block mb-1">Espacio de corte (mm)</label>
+                <input 
+                  type="number" 
+                  step="0.5"
+                  value={spacing} 
+                  onChange={(e) => setSpacing(parseFloat(e.target.value) || 0)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
+                  min="1"
+                  max="30"
+                />
+              </div>
+              <div>
+                <label className="text-slate-400 block mb-1">Tamaño Base (cm)</label>
+                <input 
+                  type="number" 
+                  value={globalTargetSize / 10} 
+                  onChange={(e) => setGlobalTargetSize((parseFloat(e.target.value) || 3) * 10)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
+                  min="1"
+                  max="50"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* === 2. TEMÁTICAS DE TRABAJO CON CONFIGURADOR DE MEDIDAS DE PLANCHITA === */}
+          <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3">
+            <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <svg className="w-4 h-4 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+              2. Planchitas por Temáticas
+            </h3>
+            
+            {/* Lista editable de medidas de temáticas */}
+            <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
+              {themes.map((theme) => (
+                <div key={theme.id} className="flex flex-col gap-1 p-2 bg-slate-950 border border-slate-850 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: theme.color }}></span>
+                      <span className="text-[11px] font-extrabold text-slate-200 truncate">{theme.name}</span>
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-3 mt-1">
+                  
+                  <div className="grid grid-cols-2 gap-2 text-[9px] text-slate-400 mt-0.5">
                     <div>
-                      <label className="text-slate-400 block mb-1">Precio Metro Film</label>
+                      <span className="block mb-0.5">Plancha Ancho (cm):</span>
                       <input 
-                        type="number" 
-                        value={pricePerMeter} 
-                        onChange={(e) => setPricePerMeter(parseInt(e.target.value) || 0)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
+                        type="number"
+                        value={theme.defaultWidth / 10}
+                        onChange={(e) => {
+                          const val = (parseFloat(e.target.value) || 1) * 10;
+                          setThemes(prev => prev.map(t => t.id === theme.id ? { ...t, defaultWidth: val } : t));
+                        }}
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-slate-100 text-center font-bold font-mono"
                       />
                     </div>
                     <div>
-                      <label className="text-slate-400 block mb-1">Símbolo Divisa</label>
+                      <span className="block mb-0.5">Plancha Alto (cm):</span>
                       <input 
-                        type="text" 
-                        value={currencySymbol} 
-                        onChange={(e) => setCurrencySymbol(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 text-center focus:outline-none"
+                        type="number"
+                        value={theme.defaultHeight / 10}
+                        onChange={(e) => {
+                          const val = (parseFloat(e.target.value) || 1) * 10;
+                          setThemes(prev => prev.map(t => t.id === theme.id ? { ...t, defaultHeight: val } : t));
+                        }}
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-slate-100 text-center font-bold font-mono"
                       />
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 pt-1">
-                    <input 
-                      type="checkbox" 
-                      id="globalCutMarks"
-                      checked={showCutMarks}
-                      onChange={(e) => setShowCutMarks(e.target.checked)}
-                      className="rounded border-slate-800 text-cyan-500 bg-slate-950 focus:ring-0 cursor-pointer"
-                    />
-                    <label htmlFor="globalCutMarks" className="text-slate-400 font-medium cursor-pointer">Mostrar guías y contornos de corte en el PDF</label>
-                  </div>
                 </div>
-              )}
+              ))}
             </div>
 
-            {/* SECCIÓN COLAPSABLE 2: GESTOR DE PLANTILLAS INTERNAS CHICAS */}
-            <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl overflow-hidden transition-all">
-              <button 
-                onClick={() => setIsPlanchasManagerOpen(!isPlanchasManagerOpen)}
-                className="w-full px-4 py-3 bg-slate-900/80 hover:bg-slate-900 flex justify-between items-center text-left text-xs font-bold uppercase tracking-wider text-slate-300 focus:outline-none"
-              >
-                <span className="flex items-center gap-2">
-                  <svg className="w-4 h-4 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="M9 17v-4h6v4"/></svg>
-                  2. Configuración de Plantillas chicas (Clientes)
-                </span>
-                <span className={`text-slate-500 font-bold transform transition-transform duration-250 ${isPlanchasManagerOpen ? 'rotate-180' : ''}`}>▼</span>
-              </button>
-
-              {isPlanchasManagerOpen && (
-                <div className="p-4 border-t border-slate-800/60 bg-slate-900/20 flex flex-col gap-4">
-                  
-                  <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
-                    {planchas.map(plancha => (
-                      <div 
-                        key={plancha.id}
-                        className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 flex justify-between items-center gap-2"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: plancha.color }}></span>
-                          <div className="text-xs min-w-0">
-                            <h4 className="font-bold text-slate-200 truncate">{plancha.name}</h4>
-                            <p className="text-[10px] text-slate-500">
-                              Medida: {plancha.width / 10} x {plancha.height / 10} cm | separación {plancha.spacing} mm
-                            </p>
-                          </div>
-                        </div>
-                        {planchas.length > 1 && (
-                          <button 
-                            type="button"
-                            onClick={() => handleRemovePlancha(plancha.id)}
-                            className="text-red-400 hover:text-red-300 text-xs font-bold px-1.5 py-0.5 rounded focus:outline-none cursor-pointer"
-                            title="Eliminar esta plantilla"
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  <form onSubmit={handleAddPlancha} className="border-t border-slate-800/60 pt-3 flex flex-col gap-2.5">
-                    <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Crear nueva plantilla interna</span>
-                    
-                    <input 
-                      type="text" 
-                      placeholder="Nombre (ej: Cliente Pedro, Planilla 14x20)" 
-                      value={newPlanchaName}
-                      onChange={(e) => setNewPlanchaName(e.target.value)} 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-violet-500"
-                    />
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div>
-                        <label className="text-slate-500 text-[10px] block mb-1">Ancho Plantilla (cm)</label>
-                        <input 
-                          type="number"
-                          value={newPlanchaWidth}
-                          onChange={(e) => setNewPlanchaWidth(parseInt(e.target.value) || 1)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200 focus:outline-none"
-                          min="5"
-                          max="58"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-slate-500 text-[10px] block mb-1">Alto Plantilla (cm)</label>
-                        <input 
-                          type="number"
-                          value={newPlanchaHeight}
-                          onChange={(e) => setNewPlanchaHeight(parseInt(e.target.value) || 1)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200 focus:outline-none"
-                          min="5"
-                          max="95"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div>
-                        <label className="text-slate-500 text-[10px] block mb-1">Espaciado Stickers (mm)</label>
-                        <input 
-                          type="number"
-                          value={newPlanchaSpacing}
-                          onChange={(e) => setNewPlanchaSpacing(parseInt(e.target.value) || 0)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200 focus:outline-none"
-                          min="1"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-slate-500 text-[10px] block mb-1">Margen Seguro (mm)</label>
-                        <input 
-                          type="number"
-                          value={newPlanchaSafeMargin}
-                          onChange={(e) => setNewPlanchaSafeMargin(parseInt(e.target.value) || 0)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-slate-200 focus:outline-none"
-                          min="0"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col justify-end">
-                      <label className="text-slate-500 text-[10px] block mb-1">Color Referencia</label>
-                      <div className="flex gap-1.5 items-center">
-                        <input 
-                          type="color" 
-                          value={newPlanchaColor}
-                          onChange={(e) => setNewPlanchaColor(e.target.value)}
-                          className="w-8 h-8 rounded bg-transparent border-0 cursor-pointer overflow-hidden"
-                        />
-                        <button 
-                          type="submit"
-                          className="flex-1 py-1.5 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white font-extrabold rounded-lg text-xs focus:outline-none cursor-pointer"
-                        >
-                          + Crear Plantilla
-                        </button>
-                      </div>
-                    </div>
-
-                  </form>
-                </div>
-              )}
-            </div>
-
-            {/* SECCIÓN COLAPSABLE 3: SUBIDA DE IMÁGENES */}
-            <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl overflow-hidden transition-all">
-              <div className="px-4 py-3 bg-slate-900/80 flex justify-between items-center text-left text-xs font-bold uppercase tracking-wider text-slate-300 font-sans">
-                <span className="flex items-center gap-2">
-                  <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-                  3. Subir Imágenes
-                </span>
-                <button 
-                  onClick={loadDemoData}
-                  className="text-[10px] text-cyan-400 hover:text-cyan-350 font-bold underline cursor-pointer bg-transparent border-none focus:outline-none"
-                >
-                  💡 Cargar Demo
-                </button>
+            {/* Formulario de creación de temática */}
+            <form onSubmit={addTheme} className="flex flex-col gap-2 mt-1 border-t border-slate-900 pt-2.5">
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Nueva temática..." 
+                  value={newThemeName}
+                  onChange={(e) => setNewThemeName(e.target.value)}
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:ring-1 focus:ring-violet-500 focus:outline-none"
+                />
+                <input 
+                  type="color" 
+                  value={newThemeColor}
+                  onChange={(e) => setNewThemeColor(e.target.value)}
+                  className="w-8 h-8 rounded-lg bg-transparent border-0 cursor-pointer overflow-hidden"
+                />
               </div>
 
-              <div className="p-4 border-t border-slate-800/60 flex flex-col gap-3">
+              <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400">
                 <div>
-                  <label className="text-slate-400 text-[10px] font-bold block mb-1">Destinar stickers subidos a:</label>
-                  <select 
-                    value={selectedPlanchaForUpload}
-                    onChange={(e) => setSelectedPlanchaForUpload(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 text-xs focus:ring-1 focus:ring-cyan-500 cursor-pointer focus:outline-none"
-                  >
-                    {planchas.map(p => (
-                      <option key={p.id} value={p.id}>{p.name} ({p.width/10}x{p.height/10} cm)</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div 
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-2 text-center cursor-pointer transition-all ${
-                    isDragging 
-                      ? 'border-cyan-400 bg-cyan-950/20 text-cyan-200' 
-                      : 'border-slate-800 hover:border-slate-700 bg-slate-950/40 text-slate-400'
-                  }`}
-                >
-                  <svg className={`w-8 h-8 ${isDragging ? 'text-cyan-400 animate-bounce' : 'text-slate-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 5v14M5 12h14" strokeLinecap="round"/>
-                  </svg>
-                  <div className="text-xs font-semibold">Arrastra tus archivos de imagen aquí</div>
-                  <p className="text-[10px] text-slate-500">Soporta PNG, JPG and SVG</p>
+                  <label className="block mb-1 font-semibold">Ancho Plancha (cm):</label>
                   <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    onChange={handleFileChange} 
-                    multiple 
-                    accept="image/*" 
-                    className="hidden" 
+                    type="number" 
+                    value={newThemeWidth}
+                    onChange={(e) => setNewThemeWidth(parseFloat(e.target.value) || 1)}
+                    min="1"
+                    max="50"
+                    step="0.5"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-xs font-bold text-slate-100 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-semibold">Alto Plancha (cm):</label>
+                  <input 
+                    type="number" 
+                    value={newThemeHeight}
+                    onChange={(e) => setNewThemeHeight(parseFloat(e.target.value) || 1)}
+                    min="1"
+                    max="50"
+                    step="0.5"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-xs font-bold text-slate-100 font-mono"
                   />
                 </div>
               </div>
+
+              <button 
+                type="submit"
+                className="w-full bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white text-xs py-1.5 rounded-lg transition-colors font-bold mt-1 cursor-pointer"
+              >
+                + Crear Temática
+              </button>
+            </form>
+          </div>
+
+          {/* 3. SUBIR IMÁGENES */}
+          <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3">
+            <div className="flex justify-between items-center">
+              <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                3. Subir Imágenes
+              </h3>
+              <button 
+                onClick={loadDemoData}
+                className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold underline flex items-center gap-1 bg-transparent border-none cursor-pointer"
+              >
+                💡 Cargar Demo
+              </button>
             </div>
 
-            {/* SECCIÓN COLAPSABLE 4: LISTADO DE IMÁGENES SUBIDAS */}
-            <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl overflow-hidden transition-all">
-              <button 
-                onClick={() => setIsImagesListOpen(!isImagesListOpen)}
-                className="w-full px-4 py-3 bg-slate-900/80 hover:bg-slate-900 flex justify-between items-center text-left text-xs font-bold uppercase tracking-wider text-slate-300 focus:outline-none"
+            <div>
+              <label className="text-slate-400 text-xs block mb-1">Destinar subida a temática:</label>
+              <select 
+                value={selectedThemeForUpload}
+                onChange={(e) => setSelectedThemeForUpload(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none cursor-pointer"
               >
-                <span className="flex items-center gap-2">
-                  <svg className="w-4 h-4 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
-                  Stickers Cargados ({images.length})
-                </span>
-                <span className={`text-slate-500 font-bold transform transition-transform duration-250 ${isImagesListOpen ? 'rotate-180' : ''}`}>▼</span>
-              </button>
+                {themes.map(t => (
+                  <option key={t.id} value={t.id}>{t.name} ({t.defaultWidth/10}x{t.defaultHeight/10} cm)</option>
+                ))}
+              </select>
+            </div>
 
-              {isImagesListOpen && (
-                <div className="p-3 border-t border-slate-800/60 bg-slate-900/10 flex flex-col gap-2 max-h-87.5 overflow-y-auto">
-                  {images.length === 0 ? (
-                    <div className="text-xs text-slate-500 text-center py-6 italic">No hay imágenes. Sube tus diseños y asígnalos a tu plantilla chica.</div>
-                  ) : (
-                    images.map((img) => {
-                      const currentPlancha = planchas.find(p => p.id === img.planchaId) || { name: 'Sin Asignar', color: '#6B7280' };
-                      return (
-                        <div 
-                          key={img.id}
-                          className="bg-slate-950 border border-slate-855 rounded-xl p-2.5 flex gap-2.5 relative hover:border-slate-750 transition-all overflow-hidden"
-                        >
-                          <div className="w-12 h-12 bg-slate-900 rounded-lg p-0.5 flex items-center justify-center border border-slate-800 shrink-0 relative overflow-hidden checkboard-pattern">
-                            <img src={img.previewUrl} alt={img.name} className="max-w-full max-h-full object-contain" />
-                            <span 
-                              className="absolute bottom-0 left-0 right-0 h-1" 
-                              style={{ backgroundColor: currentPlancha.color }}
-                            ></span>
-                          </div>
+            <div 
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center gap-2 text-center cursor-pointer transition-all ${
+                isDragging 
+                  ? 'border-cyan-400 bg-cyan-950/20 text-cyan-200' 
+                  : 'border-slate-800 hover:border-slate-700 bg-slate-950/40 text-slate-400 hover:text-slate-300'
+              }`}
+            >
+              <svg className={`w-7 h-7 ${isDragging ? 'text-cyan-400 animate-bounce' : 'text-slate-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 5v14M5 12h14" strokeLinecap="round"/>
+              </svg>
+              <div className="text-xs font-semibold">Arrastra tus archivos de imagen aquí</div>
+              <p className="text-[10px] text-slate-500 font-medium">Soporta transparencias PNG y SVG</p>
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                multiple 
+                accept="image/*" 
+                className="hidden" 
+              />
+            </div>
+          </div>
 
-                          <div className="flex-1 flex flex-col gap-1 min-w-0 text-xs">
-                            <div className="flex justify-between items-start gap-1">
-                              <h4 className="font-bold text-slate-200 truncate pr-4 text-[11px]">{img.name}</h4>
-                              <button 
-                                type="button"
-                                onClick={() => removeImage(img.id)}
-                                className="absolute top-2 right-2 text-slate-500 hover:text-red-400 transition-colors focus:outline-none cursor-pointer"
-                              >
-                                ✕
-                              </button>
-                            </div>
-
-                            {/* Dropdown de Plantilla limpia */}
-                            <div className="flex items-center gap-1 text-[10px] mt-1">
-                              <span className="text-slate-500 shrink-0">Plantilla:</span>
-                              <select 
-                                value={img.planchaId} 
-                                onChange={(e) => updateImageProperty(img.id, 'planchaId', e.target.value)}
-                                className="bg-transparent border-none text-slate-300 font-semibold focus:outline-none p-0 cursor-pointer text-[10px] max-w-[150px] truncate"
-                              >
-                                {planchas.map(p => (
-                                  <option key={p.id} value={p.id} className="bg-slate-900">{p.name}</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            {/* SOLUCIÓN TOTAL AL LAYOUT COMPACTO: Fila unificada de alta densidad */}
-                            <div className="flex flex-wrap items-center justify-between gap-1.5 mt-2.5 pt-2 border-t border-slate-850/60">
-                              
-                              {/* Contador de cantidad [ - 1 + ] */}
-                              <div className="flex items-center gap-1.5 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-850 shrink-0">
-                                <button 
-                                  type="button"
-                                  onClick={() => updateImageProperty(img.id, 'quantity', Math.max(1, (img.quantity || 1) - 1))}
-                                  className="text-slate-400 hover:text-slate-200 font-bold px-1 text-[11px] cursor-pointer focus:outline-none"
-                                >
-                                  -
-                                </button>
-                                <span className="font-bold min-w-4 text-center text-slate-100 text-[11px]">{img.quantity}</span>
-                                <button 
-                                  type="button"
-                                  onClick={() => updateImageProperty(img.id, 'quantity', (img.quantity || 1) + 1)}
-                                  className="text-slate-400 hover:text-slate-200 font-bold px-1 text-[11px] cursor-pointer focus:outline-none"
-                                >
-                                  +
-                                </button>
-                              </div>
-
-                              {/* Input de tamaño numérico [ 4.0 ] cm */}
-                              <div className="flex items-center gap-1 shrink-0">
-                                <input 
-                                  type="number" 
-                                  value={img.targetSize ? img.targetSize / 10 : 4} 
-                                  onChange={(e) => updateImageProperty(img.id, 'targetSize', (parseFloat(e.target.value) || 2) * 10)}
-                                  className="w-10 bg-slate-900 border border-slate-850 rounded px-1 py-0.5 text-center text-[11px] text-slate-100 focus:outline-none font-mono"
-                                  min="1"
-                                  max="50"
-                                  step="0.5"
-                                />
-                                <span className="text-[10px] text-slate-500 font-sans font-medium">cm</span>
-                              </div>
-
-                              {/* Costo Unitario de Producción [ $30 c/u ] */}
-                              <span className="text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-900/60 px-1.5 py-0.5 rounded-md font-mono text-[10px] shrink-0" title="Costo unitario basado en mm²">
-                                {currencySymbol}{calcularCostoStickerCm2(img.targetSize || 40, (img.targetSize || 40) / (img.aspectRatio || 1))} c/u
-                              </span>
-                              
-                              {/* Botones de acción granulares [ 📥 ] [ 🎨 Editar ] */}
-                              <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-                                <button 
-                                  type="button"
-                                  onClick={() => handleDownloadSinglePng(img)}
-                                  className="text-[10px] text-emerald-400 hover:text-emerald-350 font-bold flex items-center gap-0.5 bg-emerald-950/40 p-1.5 rounded border border-emerald-800/40 transition-colors focus:outline-none shrink-0 cursor-pointer"
-                                  title="Descargar este sticker limpio"
-                                >
-                                  📥
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => openBackgroundRemovalModal(img)}
-                                  className="text-[10px] text-cyan-400 hover:text-cyan-350 font-bold flex items-center gap-0.5 bg-cyan-950/40 px-2 py-1 rounded border border-cyan-800/40 transition-colors focus:outline-none cursor-pointer shrink-0"
-                                >
-                                  🎨 Editar
-                                </button>
-                              </div>
-                            </div>
-
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+          {/* 4. LISTADO EN GRILLA DE STICKERS CARGADOS (MÁXIMO APROVECHAMIENTO) */}
+          <div className="flex-1 flex flex-col gap-3 min-h-[300px]">
+            <div className="flex justify-between items-center bg-slate-900/30 p-2 rounded-xl border border-slate-800/60">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">
+                Stickers Cargados ({images.length})
+              </span>
+              
+              {images.length > 0 && (
+                <button 
+                  onClick={() => setImages([])} 
+                  className="text-[10px] text-red-400 hover:text-red-300 font-semibold bg-transparent border-none cursor-pointer"
+                >
+                  Limpiar Todo
+                </button>
               )}
             </div>
 
+            {images.length === 0 ? (
+              <div className="flex-1 border border-slate-800/80 border-dashed rounded-xl bg-slate-950/20 flex flex-col items-center justify-center p-6 text-center text-slate-500">
+                <p className="text-xs">No hay imágenes en cola de edición.</p>
+                <button 
+                  onClick={loadDemoData}
+                  className="mt-3 text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-slate-300 px-4 py-1.5 rounded-lg font-medium transition-all cursor-pointer"
+                >
+                  Cargar diseños demo
+                </button>
+              </div>
+            ) : (
+              // GRILLA DE STICKERS DE VISTA COMPACTA
+              <div className="grid grid-cols-2 gap-2 overflow-y-auto max-h-[350px] lg:max-h-none p-1">
+                {images.map((img) => {
+                  const currentTheme = themes.find(t => t.id === img.theme) || { name: 'General', color: '#6B7280', defaultWidth: 400, defaultHeight: 200 };
+                  
+                  // Calcular tamaños físicos mostrados en el badge de la celda de la grilla
+                  let finalWidthCm = img.targetSize / 10;
+                  let finalHeightCm = (img.targetSize / 10) / (img.aspectRatio || 1);
+
+                  if (img.sizingMode === 'exact') {
+                    finalWidthCm = (img.customWidth || 40) / 10;
+                    finalHeightCm = (img.customHeight || 40) / 10;
+                  } else if (img.sizingMode === 'theme-preset') {
+                    finalWidthCm = currentTheme.defaultWidth / 10;
+                    finalHeightCm = currentTheme.defaultHeight / 10;
+                  }
+
+                  return (
+                    <div 
+                      key={img.id}
+                      onClick={() => openEditorModal(img)}
+                      className="group bg-slate-900/60 border border-slate-800/80 hover:border-violet-500/80 rounded-xl p-2.5 flex flex-col items-center gap-1.5 relative cursor-pointer transition-all hover:scale-[1.02] shadow-sm hover:shadow-violet-950/20 animate-fade-in"
+                    >
+                      {/* Miniatura en Caja */}
+                      <div className="w-full h-24 bg-slate-950 rounded-lg p-1.5 flex items-center justify-center border border-slate-850 overflow-hidden relative">
+                        <img src={img.previewUrl} alt={img.name} className="max-w-full max-h-full object-contain filter drop-shadow-md" />
+                        <span 
+                          className="absolute bottom-0 left-0 right-0 h-1" 
+                          style={{ backgroundColor: currentTheme.color }}
+                        ></span>
+                      </div>
+
+                      {/* Nombre Archivo */}
+                      <span className="text-[11px] font-bold text-slate-300 truncate w-full text-center px-1" title={img.name}>
+                        {img.name}
+                      </span>
+
+                      {/* Badges de Estado */}
+                      <div className="flex flex-col gap-1 justify-center items-center w-full">
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-950 border border-slate-850 text-emerald-400 font-mono font-bold">
+                          {finalWidthCm.toFixed(1)}x{finalHeightCm.toFixed(1)} cm
+                        </span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-950 border border-slate-850 text-cyan-400 font-bold">
+                          {img.quantity || 1} ud {img.sizingMode === 'exact' ? '(Exacta)' : img.sizingMode === 'theme-preset' ? '(Tema)' : ''}
+                        </span>
+                      </div>
+
+                      {/* Botones de acción flotantes en hover */}
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation(); // Evita abrir modal
+                          removeImage(img.id);
+                        }}
+                        className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 w-5 h-5 bg-red-600/90 text-white rounded-full flex items-center justify-center text-[10px] hover:bg-red-500 transition-all shadow-md cursor-pointer border-none z-10"
+                        title="Eliminar"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </aside>
 
@@ -1763,847 +1314,862 @@ export default function App() {
         <main className="flex-1 bg-slate-900 p-6 flex flex-col gap-4 overflow-hidden relative">
           
           {/* BARRA DE ACCIONES DE LA PLANCHA */}
-          <div className="bg-slate-950 border border-slate-800 p-3 rounded-2xl flex flex-col lg:flex-row justify-between items-center gap-3 shadow-md">
+          <div className="bg-slate-950 border border-slate-800 p-3 rounded-2xl flex flex-col lg:flex-row justify-between items-center gap-3 shadow-md shrink-0">
             
-            <div className="flex items-center gap-2 text-xs">
-              <span className="font-bold text-slate-400 font-sans">Giro Visual:</span>
+            {/* Opciones de Empaquetado */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-slate-400 ml-2">Organización:</span>
+              <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
+                <button 
+                  onClick={() => setPackingMode('theme')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                    packingMode === 'theme' 
+                      ? 'bg-violet-600 text-white shadow-sm' 
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                  📁 Planchitas Temáticas
+                </button>
+                <button 
+                  onClick={() => setPackingMode('optimized')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                    packingMode === 'optimized' 
+                      ? 'bg-emerald-600 text-white shadow-sm' 
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+                  🔄 Mezclado (Ahorro Máximo)
+                </button>
+              </div>
+            </div>
+
+            {/* Selector de Orientación del Lienzo en pantalla */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-400">Vista del Lienzo:</span>
               <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
                 <button 
                   onClick={() => setIsRotated(true)}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1 focus:outline-none cursor-pointer ${
-                    isRotated ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                    isRotated 
+                      ? 'bg-cyan-600 text-white shadow-sm' 
+                      : 'text-slate-400 hover:text-slate-200'
                   }`}
-                  title="Optimizado para monitores de laptop/computadora"
                 >
-                  📐 Vista Horizontal (Panorámica)
+                  📐 Horizontal
                 </button>
                 <button 
                   onClick={() => setIsRotated(false)}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1 focus:outline-none cursor-pointer ${
-                    !isRotated ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                    !isRotated 
+                      ? 'bg-cyan-600 text-white shadow-sm' 
+                      : 'text-slate-400 hover:text-slate-200'
                   }`}
-                  title="Orientación tradicional vertical"
                 >
-                  🪜 Vista Vertical (Clásica)
+                  🪜 Vertical
                 </button>
               </div>
             </div>
 
-            <div className="text-xs">
-              <span className="font-bold text-slate-400 font-sans">Ver Pliego Master: </span>
-              {packedSheets.length === 0 ? (
-                <span className="text-slate-500 italic font-sans">No hay pliegos con material cargado</span>
-              ) : (
-                <select 
-                  value={activePliegoIndex}
-                  onChange={(e) => setActivePliegoIndex(parseInt(e.target.value))}
-                  className="bg-slate-900 border border-slate-800 text-slate-200 px-3 py-1.5 rounded-xl font-bold cursor-pointer outline-none ml-2"
-                >
-                  {packedSheets.map((sheet, index) => (
-                    <option key={sheet.id} value={index}>
-                      {sheet.name} — Utilización {sheet.utilizationPercentage}% ({sheet.width/10}x{sheet.height/10} cm)
-                    </option>
-                  ))}
-                </select>
-              )}
+            {/* Configuración de Costos y Marcas */}
+            <div className="flex flex-wrap gap-2 items-center">
+              <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1">
+                <label className="text-[10px] text-slate-500 font-bold">m Lineal:</label>
+                <input 
+                  type="text" 
+                  value={currencySymbol} 
+                  onChange={(e) => setCurrencySymbol(e.target.value)}
+                  className="w-4 bg-transparent border-none p-0 text-xs font-bold text-slate-300 text-center focus:outline-none"
+                />
+                <input 
+                  type="number" 
+                  value={pricePerMeter} 
+                  onChange={(e) => setPricePerMeter(parseInt(e.target.value) || 0)}
+                  className="w-16 bg-transparent border-none p-0 text-xs font-bold text-slate-100 focus:outline-none text-left"
+                />
+              </div>
+
+              <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1">
+                <input 
+                  type="checkbox" 
+                  id="cutMarksCheckbox"
+                  checked={showCutMarks}
+                  onChange={(e) => setShowCutMarks(e.target.checked)}
+                  className="rounded border-slate-800 text-cyan-500 focus:ring-0 bg-slate-950 cursor-pointer w-3.5 h-3.5"
+                />
+                <label htmlFor="cutMarksCheckbox" className="text-[10px] text-slate-400 font-bold cursor-pointer">Guías</label>
+              </div>
             </div>
 
-            <div className="flex gap-2 shrink-0">
-              <button 
-                onClick={handleDownloadPliegoPng}
-                disabled={packedSheets.length === 0}
-                className="px-4 py-2.5 bg-slate-900 border border-slate-800 hover:bg-slate-850 text-slate-200 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center gap-2 cursor-pointer focus:outline-none"
-              >
-                Descargar PNG de Pliego
-              </button>
-              <button 
-                onClick={() => verificarYDescontarCredito(generatePDF)}
-                disabled={packedSheets.length === 0 || isGeneratingPdf}
-                className={`px-6 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all focus:outline-none cursor-pointer ${
-                  packedSheets.length === 0 
-                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50' 
-                    : isGeneratingPdf 
-                      ? 'bg-cyan-700 text-slate-200 cursor-wait' 
-                      : 'bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white transform active:scale-95'
-                }`}
-              >
-                {isGeneratingPdf ? (
-                  <>
-                    <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <span>Procesando PDF...</span>
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    <span>Exportar Pliego Master PDF</span>
-                  </>
-                )}
-              </button>
-            </div>
+            {/* Botón de Exportación Premium */}
+            <button 
+              onClick={generatePDF}
+              disabled={packedSheets.length === 0 || isGeneratingPdf}
+              className={`px-5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 shadow-lg transition-all ${
+                packedSheets.length === 0 
+                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50' 
+                  : isGeneratingPdf 
+                    ? 'bg-cyan-700 text-slate-200 cursor-wait' 
+                    : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white transform active:scale-95'
+              }`}
+            >
+              {isGeneratingPdf ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Exportando...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  <span>Generar PDF</span>
+                </>
+              )}
+            </button>
           </div>
 
-          {isGeneratingPdf && (
-            <div className="absolute inset-0 bg-slate-950/80 z-50 flex flex-col items-center justify-center gap-4 rounded-2xl backdrop-blur-xs">
-              <div className="bg-linear-to-tr from-cyan-500 to-blue-600 p-4 rounded-full shadow-lg">
-                <svg className="animate-spin h-8 w-8 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              </div>
-              <div className="text-center animate-pulse">
-                <h3 className="text-lg font-black text-white">Preparando el Pliego de Impresión Completo</h3>
-                <p className="text-xs text-slate-400 mt-1">Generando vectores de alta calidad y líneas de pre-corte...</p>
-                <div className="mt-4 bg-slate-900 border border-slate-850 text-cyan-400 text-xs font-mono px-4 py-1.5 rounded-full inline-block">
-                  {pdfProgress}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* LIENZO DE LA PLANCHA DE TRABAJO */}
-          <div className="flex-1 bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col overflow-hidden relative shadow-inner">
+          {/* VISUALIZADOR DE PLANCHAS */}
+          <div className="flex-1 flex flex-col md:flex-row gap-5 overflow-hidden">
             
-            <div className="flex justify-between items-center bg-slate-900 px-3 py-2 rounded-xl border border-slate-800 mb-3 text-xs">
-              {activeSheet ? (
-                <div className="flex items-center gap-3">
-                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                  <span className="font-extrabold text-slate-200">
-                    Previsualización Rollo Master (Pág. {activeSheet.id})
-                  </span>
-                  <span className="text-[10px] bg-slate-800 px-2.5 py-0.5 rounded text-slate-400 font-mono">
-                    Bobina de impresión de {activeSheet.width / 10} x {activeSheet.height / 10} cm
-                  </span>
-                </div>
+            {/* Selector Lateral de Planchas */}
+            <div className="w-full md:w-56 bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4 flex flex-row md:flex-col gap-2 overflow-x-auto md:overflow-y-auto max-h-[100px] md:max-h-none shrink-0">
+              <div className="text-xs font-bold text-slate-500 uppercase tracking-wider hidden md:block mb-2">Planchas ({packedSheets.length})</div>
+              
+              {packedSheets.length === 0 ? (
+                <div className="text-xs text-slate-600 italic py-2 hidden md:block">No hay material cargado</div>
               ) : (
-                <span className="text-slate-500 italic font-sans">Ninguna plantilla interna con stickers ha sido agregada para el armado.</span>
+                packedSheets.map((sheet, index) => (
+                  <button
+                    key={sheet.id}
+                    onClick={() => setActiveSheetIndex(index)}
+                    className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all text-left shrink-0 w-44 md:w-full ${
+                      activeSheetIndex === index 
+                        ? 'bg-slate-800 border-cyan-500 text-white shadow-md shadow-cyan-500/5' 
+                        : 'bg-slate-900/40 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                    }`}
+                  >
+                    <span 
+                      className="w-2.5 h-2.5 rounded-full shrink-0 animate-pulse" 
+                      style={{ backgroundColor: sheet.themeColor }}
+                    ></span>
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold truncate">Plancha {sheet.id}</div>
+                      <div className="text-[10px] text-slate-500 truncate">{sheet.themeName}</div>
+                      <div className="text-[10px] text-cyan-400 font-semibold">{sheet.utilizationPercentage}% Optimizado</div>
+                    </div>
+                  </button>
+                ))
               )}
-
-              <div className="flex items-center gap-2.5">
-                <span className="text-slate-400">Zoom:</span>
-                <input 
-                  type="range" 
-                  min="25" 
-                  max="100" 
-                  value={zoomLevel} 
-                  onChange={(e) => setZoomLevel(parseInt(e.target.value))}
-                  className="w-24 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                />
-                <span className="font-mono text-slate-300 w-8 text-right">{zoomLevel}%</span>
-              </div>
             </div>
 
-            <div className="flex-1 overflow-auto flex justify-center items-center bg-slate-900/60 rounded-xl border border-slate-800 p-6 relative">
-              {activeSheet ? (
-                <div 
-                  className="relative bg-slate-950 border border-dashed border-slate-700 shadow-2xl transition-all duration-300 origin-center animate-none"
-                  style={{
-                    width: isRotated ? `${activePlanchaHeight * scale}px` : `${activePlanchaWidth * scale}px`,
-                    height: isRotated ? `${activePlanchaWidth * scale}px` : `${activePlanchaHeight * scale}px`,
-                    backgroundImage: 'radial-gradient(#1e293b 1px, transparent 1px)',
-                    backgroundSize: '12px 12px'
-                  }}
-                >
-                  
-                  {isRotated ? (
-                    <div className="absolute top-0 -left-10 bottom-0 w-8 border-r border-slate-800 flex flex-col justify-between text-[9px] text-slate-500 select-none pr-1.5 font-mono text-right">
-                      {Array.from({ length: Math.floor(activePlanchaWidth / 100) + 1 }).map((_, i) => (
-                        <div key={i} className="absolute w-full" style={{ top: `${(i * 100) * scale}px` }}>{i * 10} cm —</div>
-                      ))}
-                      <div className="absolute w-full" style={{ top: `${activePlanchaWidth * scale}px` }}>{activePlanchaWidth / 10} cm —</div>
-                    </div>
-                  ) : (
-                    <div className="absolute -top-6 left-0 right-0 h-5 border-b border-slate-800 flex justify-between text-[9px] text-slate-500 select-none px-1 font-mono">
-                      {Array.from({ length: Math.floor(activePlanchaWidth / 100) + 1 }).map((_, i) => (
-                        <div key={i} className="absolute" style={{ left: `${(i * 100) * scale}px` }}>| {i * 10} cm</div>
-                      ))}
-                      <div className="absolute" style={{ left: `${activePlanchaWidth * scale}px` }}>| {activePlanchaWidth / 10} cm</div>
-                    </div>
-                  )}
-
-                  {isRotated ? (
-                    <div className="absolute -top-6 left-0 right-0 h-5 border-b border-slate-800 flex justify-between text-[9px] text-slate-500 select-none px-1 font-mono">
-                      {Array.from({ length: Math.floor(activePlanchaHeight / 100) + 1 }).map((_, i) => (
-                        <div key={i} className="absolute" style={{ left: `${(i * 100) * scale}px` }}>| {i * 10} cm</div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="absolute top-0 -left-10 bottom-0 w-8 border-r border-slate-800 flex flex-col justify-between text-[10px] text-slate-600 select-none pr-1.5 font-mono text-right">
-                      {Array.from({ length: Math.floor(activePlanchaHeight / 100) + 1 }).map((_, i) => (
-                        <div key={i} className="absolute w-full" style={{ top: `${(i * 100) * scale}px` }}>{i * 10} cm —</div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div 
-                    className="absolute border border-dashed border-red-500/40 pointer-events-none rounded animate-pulse"
-                    style={{
-                      top: `${activeSheet.safeMargin * scale}px`,
-                      left: `${activeSheet.safeMargin * scale}px`,
-                      width: isRotated ? `${(activePlanchaHeight - (activeSheet.safeMargin * 2)) * scale}px` : `${(activePlanchaWidth - (activeSheet.safeMargin * 2)) * scale}px`,
-                      height: isRotated ? `${(activePlanchaWidth - (activeSheet.safeMargin * 2)) * scale}px` : `${(activePlanchaHeight - (activeSheet.safeMargin * 2)) * scale}px`
-                    }}
-                  >
-                    <span className="absolute -top-4 left-1 text-[8px] text-red-500/70 font-bold uppercase tracking-wider">
-                      Límite Imprimible Rollo Maestro
+            {/* Lienzo / Canvas de la Plancha Activa */}
+            <div className="flex-1 bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col overflow-hidden relative shadow-inner">
+              
+              {/* Barra de control de Zoom */}
+              <div className="flex justify-between items-center bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 mb-3 text-xs shrink-0">
+                {packedSheets[activeSheetIndex] ? (
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-slate-300">Plancha {packedSheets[activeSheetIndex].id}</span>
+                    <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400">
+                      Medida Real: {sheetWidth / 10} x {sheetHeight / 10} cm
+                    </span>
+                    <span className="text-[10px] text-cyan-400 font-semibold">
+                      ({packedSheets[activeSheetIndex].packedItems.length} stickers)
                     </span>
                   </div>
+                ) : (
+                  <span className="text-slate-500">Sin planchas para previsualizar</span>
+                )}
+                
+                <div className="flex items-center gap-2.5">
+                  <span className="text-slate-400">Zoom:</span>
+                  <input 
+                    type="range" 
+                    min="20" 
+                    max="100" 
+                    value={zoomLevel} 
+                    onChange={(e) => setZoomLevel(parseInt(e.target.value))}
+                    className="w-24 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                  />
+                  <span className="font-mono text-slate-300 w-8 text-right">{zoomLevel}%</span>
+                </div>
+              </div>
 
-                  {activeSheet.packedPlanchas.map((plancha) => {
-                    const pLeft = isRotated ? plancha.y * scale : plancha.x * scale;
-                    const pTop = isRotated ? plancha.x * scale : plancha.y * scale;
-                    const pWidth = isRotated ? plancha.height * scale : plancha.width * scale;
-                    const pHeight = isRotated ? plancha.width * scale : plancha.height * scale;
+              {/* El Film de impresión */}
+              <div className="flex-1 overflow-auto flex justify-center items-center bg-slate-900/60 rounded-xl border border-slate-800 p-6 relative">
+                {packedSheets[activeSheetIndex] ? (
+                  <div 
+                    className="relative bg-slate-950 border border-dashed border-slate-700 shadow-2xl transition-all"
+                    style={{
+                      width: isRotated ? `${sheetHeight * scale}px` : `${sheetWidth * scale}px`,
+                      height: isRotated ? `${sheetWidth * scale}px` : `${sheetHeight * scale}px`,
+                      backgroundImage: 'radial-gradient(#1e293b 1px, transparent 1px)',
+                      backgroundSize: '12px 12px'
+                    }}
+                  >
+                    
+                    {/* REGLA MILIMÉTRICA DINÁMICA */}
+                    {isRotated ? (
+                      <div className="absolute -top-6 left-0 right-0 h-5 border-b border-slate-800 flex justify-between text-[9px] text-slate-500 select-none px-1 font-mono">
+                        {Array.from({ length: Math.floor(sheetHeight / 100) + 1 }).map((_, i) => (
+                          <div 
+                            key={i} 
+                            className="absolute"
+                            style={{ left: `${(i * 100) * scale}px` }}
+                          >
+                            | {i * 10} cm
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="absolute top-0 -left-10 bottom-0 w-8 border-r border-slate-800 flex flex-col justify-between text-[10px] text-slate-600 select-none pr-1.5 font-mono text-right">
+                        {Array.from({ length: Math.floor(sheetHeight / 100) + 1 }).map((_, i) => (
+                          <div 
+                            key={i} 
+                            className="absolute w-full"
+                            style={{ top: `${(i * 100) * scale}px` }}
+                          >
+                            {i * 10} cm —
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
-                    return (
-                      <React.Fragment key={plancha.id}>
+                    {/* REGLA ANCHO BOBINA (58 cm) */}
+                    {isRotated ? (
+                      <div className="absolute top-0 -left-10 bottom-0 w-8 border-r border-slate-850 flex flex-col justify-between text-[9px] text-slate-500 select-none pr-1.5 font-mono text-right">
+                        {Array.from({ length: Math.floor(sheetWidth / 100) + 1 }).map((_, i) => (
+                          <div 
+                            key={i} 
+                            className="absolute w-full"
+                            style={{ top: `${(i * 100) * scale}px` }}
+                          >
+                            {i * 10} cm —
+                          </div>
+                        ))}
+                        <div className="absolute w-full" style={{ top: `${sheetWidth * scale}px` }}>58 cm —</div>
+                      </div>
+                    ) : (
+                      <div className="absolute -top-6 left-0 right-0 h-5 border-b border-slate-850 flex justify-between text-[9px] text-slate-500 select-none px-1 font-mono">
+                        {Array.from({ length: Math.floor(sheetWidth / 100) + 1 }).map((_, i) => (
+                          <div 
+                            key={i} 
+                            className="absolute"
+                            style={{ left: `${(i * 100) * scale}px` }}
+                          >
+                            | {i * 10} cm
+                          </div>
+                        ))}
+                        <div className="absolute" style={{ left: `${sheetWidth * scale}px` }}>| 58 cm</div>
+                      </div>
+                    )}
+
+                    {/* Línea e indicador visual de Margen Seguro */}
+                    <div 
+                      className="absolute border border-dashed border-red-500/40 pointer-events-none rounded"
+                      style={{
+                        top: `${safeMargin * scale}px`,
+                        left: `${safeMargin * scale}px`,
+                        right: `${safeMargin * scale}px`,
+                        bottom: `${safeMargin * scale}px`,
+                        width: isRotated ? `${(sheetHeight - (safeMargin * 2)) * scale}px` : `${(sheetWidth - (safeMargin * 2)) * scale}px`,
+                        height: isRotated ? `${(sheetWidth - (safeMargin * 2)) * scale}px` : `${(sheetHeight - (safeMargin * 2)) * scale}px`
+                      }}
+                    >
+                      <span className="absolute -top-4 left-1 text-[8px] text-red-500/70 font-bold uppercase tracking-wider">
+                        Borde Seguro Impresión
+                      </span>
+                    </div>
+
+                    {/* === DIBUJAR CONTENEDORES DE PLANCHITAS TEMÁTICAS RECTANGULARES === */}
+                    {packingMode === 'theme' && packedSheets[activeSheetIndex]?.packedBlocks?.map((block, bIdx) => {
+                      const leftPos = isRotated ? block.y * scale : block.x * scale;
+                      const topPos = isRotated ? block.x * scale : block.y * scale;
+                      const widthSize = isRotated ? block.height * scale : block.width * scale;
+                      const heightSize = isRotated ? block.width * scale : block.height * scale;
+
+                      return (
                         <div
-                          className="absolute border-2 border-dashed rounded-xl pointer-events-none transition-all"
+                          key={`block_${bIdx}`}
+                          className="absolute border-2 border-dashed rounded-xl pointer-events-none z-10 flex flex-col justify-start"
                           style={{
-                            left: `${pLeft}px`,
-                            top: `${pTop}px`,
-                            width: `${pWidth}px`,
-                            height: `${pHeight}px`,
-                            borderColor: plancha.color,
-                            backgroundColor: `${plancha.color}15`, 
+                            left: `${leftPos}px`,
+                            top: `${topPos}px`,
+                            width: `${widthSize}px`,
+                            height: `${heightSize}px`,
+                            borderColor: block.themeColor,
+                            backgroundColor: `${block.themeColor}05`
                           }}
                         >
                           <div 
-                            className="absolute border border-dotted rounded-lg"
-                            style={{
-                              top: `${5 * scale}px`,
-                              left: `${5 * scale}px`,
-                              right: `${5 * scale}px`,
-                              bottom: `${5 * scale}px`,
-                              borderColor: `${plancha.color}35`
-                            }}
-                          />
+                            className="text-[9px] font-black text-slate-100 px-2 py-0.5 rounded-br-lg rounded-tl-sm self-start whitespace-nowrap shadow flex items-center gap-1 select-none pointer-events-auto"
+                            style={{ backgroundColor: block.themeColor }}
+                            title={`Esta planchita mide exactamente ${block.width/10}x${block.height/10} cm`}
+                          >
+                            <span>📁 {block.themeName}</span>
+                            <span className="opacity-75 font-normal">({block.width/10}x{block.height/10} cm)</span>
+                          </div>
                         </div>
+                      );
+                    })}
 
-                        <div 
-                          className="absolute text-[8px] font-black px-1.5 py-0.5 rounded text-white pointer-events-none z-10 truncate max-w-37.5 shadow-md"
-                          style={{ 
-                            backgroundColor: plancha.color,
-                            left: `${pLeft + 6}px`,
-                            top: `${pTop - 6}px`,
-                          }}
-                        >
-                          {plancha.name}
-                        </div>
-                      </React.Fragment>
-                    );
-                  })}
+                    {/* Stickers en el Lienzo */}
+                    {packedSheets[activeSheetIndex]?.packedItems?.map((item) => {
+                      const itemTheme = themes.find(t => t.id === item.theme) || { color: '#8B5CF6' };
+                      
+                      const leftPos = isRotated ? item.y * scale : item.x * scale;
+                      const topPos = isRotated ? item.x * scale : item.y * scale;
+                      const widthSize = isRotated ? item.height * scale : item.width * scale;
+                      const heightSize = isRotated ? item.width * scale : item.height * scale;
 
-                  {activeSheet.packedPlanchas.flatMap(p => p.packedStickers).map((item) => {
-                    const leftPos = isRotated ? item.globalY * scale : item.globalX * scale;
-                    const topPos = isRotated ? item.globalX * scale : item.globalY * scale;
-                    const widthSize = isRotated ? item.height * scale : item.width * scale;
-                    const heightSize = isRotated ? item.width * scale : item.height * scale;
-
-                    return (
-                      <div
-                        key={item.id}
-                        className="absolute group cursor-pointer"
-                        style={{
-                          left: `${leftPos}px`,
-                          top: `${topPos}px`,
-                          width: `${widthSize}px`,
-                          height: `${heightSize}px`
-                        }}
-                        onMouseEnter={() => setHoveredSticker(item)}
-                        onMouseLeave={() => setHoveredSticker(null)}
-                      >
-                        <div 
-                          className="w-full h-full p-px rounded transition-all group-hover:scale-105 group-hover:shadow-lg relative overflow-hidden flex items-center justify-center checkboard-pattern"
+                      return (
+                        <div
+                          key={item.id}
+                          className="absolute group cursor-pointer z-20"
                           style={{
-                            border: `1.5px solid #22d3ee40`,
-                            backgroundColor: 'rgba(30, 41, 59, 0.05)'
+                            left: `${leftPos}px`,
+                            top: `${topPos}px`,
+                            width: `${widthSize}px`,
+                            height: `${heightSize}px`
                           }}
+                          onMouseEnter={() => setHoveredSticker(item)}
+                          onMouseLeave={() => setHoveredSticker(null)}
                         >
-                          <img 
-                            src={item.imageSrc} 
-                            alt={item.name} 
-                            className="pointer-events-none object-contain w-full h-full"
+                          <div 
+                            className="w-full h-full p-[1px] rounded transition-all group-hover:scale-105 group-hover:shadow-lg relative overflow-hidden flex items-center justify-center"
                             style={{
-                              transform: isRotated ? 'rotate(-90deg)' : 'none',
-                              transition: 'transform 0.15s ease'
+                              border: `1.5px solid ${itemTheme.color}60`,
+                              backgroundColor: 'rgba(30, 41, 59, 0.05)'
                             }}
-                          />
+                          >
+                            <img 
+                              src={item.imageSrc} 
+                              alt={item.name} 
+                              className="pointer-events-none object-contain animate-fade-in"
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                transform: isRotated ? 'rotate(-90deg)' : 'none',
+                                transition: 'transform 0.15s ease'
+                              }}
+                            />
 
-                          <div className="absolute opacity-0 group-hover:opacity-100 bg-slate-950/90 border border-slate-700 text-[9px] px-2 py-1 rounded-lg text-slate-100 -top-8 left-1/2 transform -translate-x-1/2 whitespace-nowrap shadow-xl z-20 transition-all pointer-events-none">
-                            <span className="font-bold">{item.name}</span>
-                            <div className="text-cyan-400 font-mono text-[8px] mt-0.5">
-                              {(item.width / 10).toFixed(1)} x {(item.height / 10).toFixed(1)} cm
+                            {/* Badge flotante en hover */}
+                            <div className="absolute opacity-0 group-hover:opacity-100 bg-slate-950/90 border border-slate-700 text-[9px] px-2 py-1 rounded-lg text-slate-100 -top-8 left-1/2 transform -translate-x-1/2 whitespace-nowrap shadow-xl z-20 transition-all pointer-events-none">
+                              <span className="font-bold">{item.name}</span>
+                              <div className="text-cyan-400 font-mono text-[8px] mt-0.5">
+                                {(item.width / 10).toFixed(1)} x {(item.height / 10).toFixed(1)} cm
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
 
-                  {hoveredSticker && (
-                    <div 
-                      className="absolute bg-transparent border-2 border-dashed pointer-events-none z-30"
-                      style={{
-                        left: `${(isRotated ? hoveredSticker.globalY : hoveredSticker.globalX) * scale}px`,
-                        top: `${(isRotated ? hoveredSticker.globalX : hoveredSticker.globalY) * scale}px`,
-                        width: `${(isRotated ? hoveredSticker.height : hoveredSticker.width) * scale}px`,
-                        height: `${(isRotated ? hoveredSticker.width : hoveredSticker.height) * scale}px`,
-                        borderColor: '#22d3ee'
-                      }}
-                    ></div>
-                  )}
+                    {/* Guía en Hover */}
+                    {hoveredSticker && (
+                      <div 
+                        className="absolute bg-transparent border-2 border-dashed pointer-events-none z-30 animate-pulse"
+                        style={{
+                          left: `${(isRotated ? hoveredSticker.y : hoveredSticker.x) * scale}px`,
+                          top: `${(isRotated ? hoveredSticker.x : hoveredSticker.y) * scale}px`,
+                          width: `${(isRotated ? hoveredSticker.height : hoveredSticker.width) * scale}px`,
+                          height: `${(isRotated ? hoveredSticker.width : hoveredSticker.height) * scale}px`,
+                          borderColor: '#22d3ee'
+                        }}
+                      ></div>
+                    )}
 
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center p-12 text-center text-slate-600 gap-3">
-                  <svg className="w-12 h-12 text-slate-850" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                    <line x1="9" y1="9" x2="15" y2="15"/>
-                    <line x1="15" y1="9" x2="9" y2="15"/>
-                  </svg>
-                  <div>
-                    <p className="text-sm font-bold text-slate-400">Área de Visualización Vacía</p>
-                    <p className="text-xs text-slate-500 mt-1">Sube tus stickers o carga los datos demo en una plantilla chica para empezar.</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center p-12 text-center text-slate-600 gap-3">
+                    <svg className="w-12 h-12 text-slate-800" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                      <line x1="9" y1="9" x2="15" y2="15"/>
+                      <line x1="15" y1="9" x2="9" y2="15"/>
+                    </svg>
+                    <div>
+                      <p className="text-sm font-bold text-slate-400">Plancha Vacía</p>
+                      <p className="text-xs text-slate-500 mt-1">Sube tus stickers e imágenes por temáticas para ver el empaquetado inteligente.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* BARRA DE ESTADO DEL LIENZO */}
+              {packedSheets[activeSheetIndex] && (
+                <div className="mt-3 flex flex-wrap justify-between items-center text-xs text-slate-400 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80 shrink-0">
+                  <div className="flex gap-4">
+                    <span>Stickers en esta plancha: <strong>{packedSheets[activeSheetIndex].packedItems.length}</strong></span>
+                    <span>Ancho Útil: <strong>{(sheetWidth - (safeMargin * 2)) / 10} cm</strong></span>
+                    <span>Alto Útil: <strong>{(sheetHeight - (safeMargin * 2)) / 10} cm</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                    <span>Eficiencia de Espacio: <strong className="text-cyan-400">{packedSheets[activeSheetIndex].utilizationPercentage}%</strong></span>
                   </div>
                 </div>
               )}
+
             </div>
-
-            {activeSheet && (
-              <div className="mt-3 flex flex-wrap justify-between items-center text-xs text-slate-400 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
-                <div className="flex gap-4 font-sans">
-                  <span>Plantillas chicas anidadas: <strong>{activeSheet.packedPlanchas.length}</strong></span>
-                  <span>Ancho Útil Master: <strong>{(activeSheet.width - (activeSheet.safeMargin * 2)) / 10} cm</strong></span>
-                  <span>Alto Útil Master: <strong>{(activeSheet.height - (activeSheet.safeMargin * 2)) / 10} cm</strong></span>
-                </div>
-                <div className="flex items-center gap-1.5 font-sans">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                  <span>Aprovechamiento del Pliego Master: <strong className="text-cyan-400">{activeSheet.utilizationPercentage}%</strong></span>
-                </div>
-              </div>
-            )}
-
           </div>
         </main>
       </div>
 
-      {/* ================= MODAL DE EDICIÓN AVANZADA (REMOVEDOR Y BORDES) ================= */}
-      {editingImage && (
-        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-4xl flex flex-col max-h-[90vh]">
+      {/* ==================================================================== */}
+      {/* === MODAL DE EDICIÓN AVANZADA DE STICKER (MÓDULO PRE-PRENSA PRO) === */}
+      {/* ==================================================================== */}
+      {editingSticker && (
+        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-5xl max-h-[95vh] md:max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-scale-up">
             
-            <div className="flex justify-between items-center pb-4 border-b border-slate-800 mb-2">
-              <div>
-                <h3 className="text-lg font-black text-white flex items-center gap-2">
-                  <span>🎨</span> Editor Avanzado de Stickers
-                </h3>
-                <p className="text-xs text-slate-400">Personaliza la transparencia del fondo y el contorno físico de tu sticker</p>
+            {/* Cabecera del Editor */}
+            <div className="bg-slate-950 border-b border-slate-800 px-6 py-4 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="bg-violet-600/15 text-violet-400 p-2 rounded-xl border border-violet-500/20 animate-pulse">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-100 flex items-center gap-2">
+                    <span>Configuración & Edición de Stickers</span>
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold">
+                      ⚡ Autopreview Activo
+                    </span>
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-medium">Recortes interactivos, remoción cromática de fondos y trazado de contorno de seguridad</p>
+                </div>
               </div>
               <button 
-                onClick={() => setEditingImage(null)}
-                className="text-slate-400 hover:text-white text-lg font-bold focus:outline-none cursor-pointer"
+                onClick={() => setEditingSticker(null)}
+                className="text-slate-400 hover:text-slate-100 bg-slate-900 hover:bg-slate-850 px-4 py-2 rounded-xl transition-all font-semibold"
               >
-                ✕
+                ✕ Cerrar
               </button>
             </div>
 
-            <div className="flex border-b border-slate-800 mb-4">
-              <button
-                onClick={() => setActiveTab('bg')}
-                className={`py-2.5 px-4 text-xs font-bold border-b-2 transition-all flex items-center gap-2 focus:outline-none ${
-                  activeTab === 'bg'
-                    ? 'border-cyan-500 text-cyan-400 bg-slate-950/10'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <span>🪄</span> Quitar Fondo
-              </button>
-              <button
-                onClick={() => setActiveTab('crop')}
-                className={`py-2.5 px-4 text-xs font-bold border-b-2 transition-all flex items-center gap-2 focus:outline-none ${
-                  activeTab === 'crop'
-                    ? 'border-cyan-500 text-cyan-400 bg-slate-950/10'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <span>✂️</span> Recorte Manual (Crop)
-              </button>
-              <button
-                onClick={() => setActiveTab('stroke')}
-                className={`py-2.5 px-4 text-xs font-bold border-b-2 transition-all flex items-center gap-2 focus:outline-none ${
-                  activeTab === 'stroke'
-                    ? 'border-cyan-500 text-cyan-400 bg-slate-950/10'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <span>⭕</span> Contorno (Borde Offset)
-              </button>
-            </div>
-
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-hidden">
+            {/* Cuerpo del Editor */}
+            <div className="flex-1 overflow-y-auto p-6 flex flex-col md:flex-row gap-6">
               
-              <div className="flex flex-col gap-5 justify-between">
+              {/* Visualizador Comparador (Original vs Resultado) */}
+              <div className="flex-1 flex flex-col gap-3 min-w-0">
+                <div className="flex justify-between items-center">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lienzo Interactivo de Trabajo</span>
+                  
+                  {/* Botón de Recorte principal */}
+                  <button 
+                    onClick={() => setCropMode(!cropMode)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      cropMode 
+                        ? 'bg-cyan-500 text-slate-950 font-black shadow-md' 
+                        : 'bg-slate-850 border border-slate-800 text-slate-200 hover:bg-slate-850'
+                    }`}
+                  >
+                    ✂️ {cropMode ? 'Ajustando Recorte...' : 'Ajustar Recorte'}
+                  </button>
+                </div>
                 
-                {activeTab === 'bg' && (
-                  <div className="flex flex-col gap-4">
-                    <div className="flex items-center justify-between bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <label className="text-xs font-bold text-slate-300">Activar Remoción de Fondo</label>
-                      <input 
-                        type="checkbox"
-                        checked={isBgRemovalActive}
-                        onChange={(e) => setIsBgRemovalActive(e.target.checked)}
-                        className="rounded border-slate-800 text-cyan-500 w-4 h-4 cursor-pointer focus:ring-0"
+                <div className="flex-1 bg-slate-950 rounded-2xl border border-slate-800/80 p-6 flex items-center justify-center relative overflow-hidden min-h-[340px] pattern-bg shadow-inner">
+                  
+                  {/* === ENTORNO DE RECORTE CON TIRADORES REALES === */}
+                  <div 
+                    ref={cropContainerRef}
+                    className="relative max-w-full max-h-[340px] select-none"
+                    style={{ aspectRatio: editingSticker.aspectRatio || 1 }}
+                  >
+                    {/* Imagen de fondo atenuada de referencia */}
+                    <img 
+                      src={editingSticker.originalUrl} 
+                      alt="Referencia" 
+                      className="max-w-full max-h-[340px] object-contain opacity-25" 
+                      draggable={false}
+                    />
+
+                    {/* Imagen principal que se renderiza */}
+                    {!cropMode && (
+                      <img 
+                        src={localPreviewUrl || editingSticker.previewUrl} 
+                        alt="Resultado" 
+                        className="absolute inset-0 w-full h-full object-contain filter drop-shadow-xl animate-fade-in" 
+                        draggable={false}
                       />
-                    </div>
-
-                    {isBgRemovalActive && (
-                      <>
-                        <div>
-                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2 font-sans">Canales de Color a Borrar</span>
-                          <div className="grid grid-cols-2 gap-2 mb-2">
-                            <button
-                              type="button"
-                              onClick={() => setActiveColorSlot(1)}
-                              className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all focus:outline-none ${
-                                activeColorSlot === 1
-                                  ? 'bg-cyan-500/10 border-cyan-500 text-cyan-400'
-                                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-300'
-                              }`}
-                            >
-                              Slot 1 (Principal)
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setActiveColorSlot(2);
-                                setIsColor2Enabled(true);
-                              }}
-                              className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all focus:outline-none ${
-                                activeColorSlot === 2
-                                  ? 'bg-cyan-500/10 border-cyan-500 text-cyan-400'
-                                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-300'
-                              }`}
-                            >
-                              Slot 2 {isColor2Enabled ? '(Activo)' : '(Inactivo)'}
-                            </button>
-                          </div>
-                          
-                          <div className="flex items-center gap-2 pt-1 mb-2 text-xs">
-                            <input 
-                              type="checkbox" 
-                              id="enableColor2"
-                              checked={isColor2Enabled}
-                              onChange={(e) => setIsColor2Enabled(e.target.checked)}
-                              className="rounded border-slate-800 text-cyan-500 cursor-pointer"
-                            />
-                            <label htmlFor="enableColor2" className="text-slate-400 cursor-pointer font-sans">Habilitar segundo color</label>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="bg-slate-950 border border-slate-850 p-2.5 rounded-xl flex flex-col gap-1 items-center">
-                            <span className="text-[10px] text-slate-500 font-bold uppercase">Color 1</span>
-                            <div 
-                              className="w-8 h-8 rounded-lg border border-slate-700"
-                              style={{ backgroundColor: `rgb(${colorBorrar1.r}, ${colorBorrar1.g}, ${colorBorrar1.b})` }}
-                            />
-                            <span className="text-[10px] font-mono text-slate-300">RGB({colorBorrar1.r},{colorBorrar1.g},{colorBorrar1.b})</span>
-                          </div>
-                          <div className="bg-slate-950 border border-slate-850 p-2.5 rounded-xl flex flex-col gap-1 items-center relative">
-                            {!isColor2Enabled && (
-                              <div className="absolute inset-0 bg-slate-950/70 rounded-xl flex items-center justify-center text-[10px] text-slate-500 font-semibold">Inactivo</div>
-                            )}
-                            <span className="text-[10px] text-slate-500 font-bold uppercase">Color 2</span>
-                            <div 
-                              className="w-8 h-8 rounded-lg border border-slate-700"
-                              style={{ backgroundColor: `rgb(${colorBorrar2.r}, ${colorBorrar2.g}, ${colorBorrar2.b})` }}
-                            />
-                            <span className="text-[10px] font-mono text-slate-300">RGB({colorBorrar2.r},{colorBorrar2.g},{colorBorrar2.b})</span>
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="flex justify-between items-center mb-1 font-sans">
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tolerancia base</span>
-                            <span className="text-xs font-mono font-bold text-cyan-400">{bgTolerance}%</span>
-                          </div>
-                          <input 
-                            type="range" 
-                            min="1" 
-                            max="100" 
-                            value={bgTolerance} 
-                            onChange={(e) => setBgTolerance(parseInt(e.target.value))}
-                            className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                          />
-                        </div>
-
-                        <div>
-                          <div className="flex justify-between items-center mb-1 font-sans">
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                              <span>🧼</span> Limpieza de Halo (Anti-Alias)
-                            </span>
-                            <span className="text-xs font-mono font-bold text-cyan-400">{haloCleanup} px</span>
-                          </div>
-                          <input 
-                            type="range" 
-                            min="0" 
-                            max="5" 
-                            step="1"
-                            value={haloCleanup} 
-                            onChange={(e) => setHaloCleanup(parseInt(e.target.value))}
-                            className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                          />
-                        </div>
-                      </>
                     )}
-                  </div>
-                )}
 
-                {activeTab === 'crop' && (
-                  <div className="flex flex-col gap-4 text-xs">
-                    <div className="flex items-center justify-between bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <label className="text-xs font-bold text-slate-300">Activar Recorte Manual</label>
-                      <input 
-                        type="checkbox"
-                        checked={cropEnabled}
-                        onChange={(e) => setCropEnabled(e.target.checked)}
-                        className="rounded border-slate-800 text-cyan-500 w-4 h-4 cursor-pointer focus:ring-0"
-                      />
-                    </div>
-                    {cropEnabled && (
-                      <div className="space-y-3 font-sans">
-                        <span className="text-[10px] text-slate-400 block leading-relaxed">
-                          Ajusta los límites del recuadro o arrástralo sobre la previsualización del sticker:
-                        </span>
-                        <div className="grid grid-cols-2 gap-2 font-mono">
-                          <div>
-                            <span className="text-slate-500 text-[10px] block mb-1">X (Margen Izq)</span>
-                            <input 
-                              type="range" min="0" max="80" value={cropBox.x} 
-                              onChange={(e) => setCropBox(prev => ({ ...prev, x: parseInt(e.target.value), width: Math.min(100 - parseInt(e.target.value), prev.width) }))}
-                              className="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                            />
-                            <span className="text-slate-400 text-[10px] block text-center mt-0.5">{cropBox.x}%</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 text-[10px] block mb-1">Y (Margen Sup)</span>
-                            <input 
-                              type="range" min="0" max="80" value={cropBox.y} 
-                              onChange={(e) => setCropBox(prev => ({ ...prev, y: parseInt(e.target.value), height: Math.min(100 - parseInt(e.target.value), prev.height) }))}
-                              className="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                            />
-                            <span className="text-slate-400 text-[10px] block text-center mt-0.5">{cropBox.y}%</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 text-[10px] block mb-1">Ancho Recorte</span>
-                            <input 
-                              type="range" min="10" max="100" value={cropBox.width} 
-                              onChange={(e) => setCropBox(prev => ({ ...prev, width: Math.min(100 - prev.x, parseInt(e.target.value)) }))}
-                              className="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                            />
-                            <span className="text-slate-400 text-[10px] block text-center mt-0.5">{cropBox.width}%</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 text-[10px] block mb-1">Alto Recorte</span>
-                            <input 
-                              type="range" min="10" max="100" value={cropBox.height} 
-                              onChange={(e) => setCropBox(prev => ({ ...prev, height: Math.min(100 - prev.y, parseInt(e.target.value)) }))}
-                              className="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                            />
-                            <span className="text-slate-400 text-[10px] block text-center mt-0.5">{cropBox.height}%</span>
-                          </div>
+                    {/* RECUADRO DE RECORTE INTERACTIVO DRAGGABLE */}
+                    {cropMode && (
+                      <div 
+                        className="absolute border border-cyan-400 shadow-[0_0_0_9999px_rgba(15,23,42,0.8)] cursor-move select-none"
+                        style={{
+                          top: `${cropBounds.top}%`,
+                          left: `${cropBounds.left}%`,
+                          width: `${100 - cropBounds.left - cropBounds.right}%`,
+                          height: `${100 - cropBounds.top - cropBounds.bottom}%`,
+                        }}
+                        onMouseDown={(e) => handleHandleMouseDown(e, 'move')}
+                      >
+                        {/* Guías interiores de la regla de tercios */}
+                        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none opacity-40">
+                          <div className="border-r border-b border-cyan-400/50"></div>
+                          <div className="border-r border-b border-cyan-400/50"></div>
+                          <div className="border-b border-cyan-400/50"></div>
+                          <div className="border-r border-b border-cyan-400/50"></div>
+                          <div className="border-r border-b border-cyan-400/50"></div>
+                          <div className="border-b border-cyan-400/50"></div>
+                          <div className="border-r border-cyan-400/50"></div>
+                          <div className="border-r border-cyan-400/50"></div>
+                          <div></div>
                         </div>
-                        <button 
-                          type="button" 
-                          onClick={() => setCropBox({ x: 10, y: 10, width: 80, height: 80 })}
-                          className="py-1.5 px-3 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-300 font-semibold rounded-lg w-full text-center"
-                        >
-                          Reestablecer Recuadro (80%)
-                        </button>
+
+                        {/* TIRADORES DE REDIMENSIONAMIENTO (ESQUINAS) */}
+                        <div 
+                          className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-cyan-400 rounded-sm cursor-nwse-resize border border-slate-900"
+                          onMouseDown={(e) => handleHandleMouseDown(e, 'nw')}
+                        ></div>
+                        <div 
+                          className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-cyan-400 rounded-sm cursor-nesw-resize border border-slate-900"
+                          onMouseDown={(e) => handleHandleMouseDown(e, 'ne')}
+                        ></div>
+                        <div 
+                          className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-cyan-400 rounded-sm cursor-nesw-resize border border-slate-900"
+                          onMouseDown={(e) => handleHandleMouseDown(e, 'sw')}
+                        ></div>
+                        <div 
+                          className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-cyan-400 rounded-sm cursor-nwse-resize border border-slate-900"
+                          onMouseDown={(e) => handleHandleMouseDown(e, 'se')}
+                        ></div>
+
+                        {/* TIRADORES LATERALES (BORDES) */}
+                        <div 
+                          className="absolute top-1/2 -left-1 w-2 h-4 bg-cyan-400 rounded-sm cursor-ew-resize -translate-y-1/2 border border-slate-900"
+                          onMouseDown={(e) => handleHandleMouseDown(e, 'w')}
+                        ></div>
+                        <div 
+                          className="absolute top-1/2 -right-1 w-2 h-4 bg-cyan-400 rounded-sm cursor-ew-resize -translate-y-1/2 border border-slate-900"
+                          onMouseDown={(e) => handleHandleMouseDown(e, 'e')}
+                        ></div>
+                        <div 
+                          className="absolute -top-1 left-1/2 w-4 h-2 bg-cyan-400 rounded-sm cursor-ns-resize -translate-x-1/2 border border-slate-900"
+                          onMouseDown={(e) => handleHandleMouseDown(e, 'n')}
+                        ></div>
+                        <div 
+                          className="absolute -bottom-1 left-1/2 w-4 h-2 bg-cyan-400 rounded-sm cursor-ns-resize -translate-x-1/2 border border-slate-900"
+                          onMouseDown={(e) => handleHandleMouseDown(e, 's')}
+                        ></div>
                       </div>
                     )}
                   </div>
-                )}
+                </div>
 
-                {activeTab === 'stroke' && (
-                  <div className="flex flex-col gap-4">
-                    <div className="flex items-center justify-between bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <label className="text-xs font-bold text-slate-300">Activar Borde de Sticker</label>
+                {/* Info de tamaño resultante recortado */}
+                <div className="flex justify-between items-center text-xs text-slate-400 bg-slate-950/40 p-3 rounded-xl border border-slate-800/80">
+                  <span>Tamaño Resultante de Impresión:</span>
+                  <span className="font-mono text-cyan-400 font-bold">
+                    {calculatedCropWidthCm.toFixed(1)} x {calculatedCropHeightCm.toFixed(1)} cm
+                  </span>
+                </div>
+              </div>
+
+              {/* Panel de Herramientas de Edición y Parámetros */}
+              <div className="w-full md:w-80 shrink-0 flex flex-col gap-4 overflow-y-auto pr-1">
+                
+                {/* BLOQUE A: DATOS FÍSICOS (MEDIDAS, COPIAS, CATEGORÍA) */}
+                <div className="bg-slate-950/60 border border-slate-850 rounded-2xl p-4 flex flex-col gap-3">
+                  <span className="text-xs font-black text-slate-200 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                    📏 Parámetros Físicos
+                  </span>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-semibold block mb-1">Nombre:</label>
+                    <input 
+                      type="text"
+                      value={editorEffects.name}
+                      onChange={(e) => setEditorEffects(prev => ({ ...prev, name: e.target.value }))}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-bold text-slate-100 font-mono"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-semibold block mb-1">Medida Base (cm):</label>
                       <input 
-                        type="checkbox"
-                        checked={strokeEnabled}
-                        onChange={(e) => setStrokeEnabled(e.target.checked)}
-                        className="rounded border-slate-800 text-cyan-500 w-4 h-4 cursor-pointer focus:ring-0"
+                        type="number" 
+                        value={editorEffects.targetSize / 10} 
+                        disabled={editorEffects.sizingMode === 'exact' || editorEffects.sizingMode === 'theme-preset'}
+                        onChange={(e) => setEditorEffects(prev => ({ ...prev, targetSize: (parseFloat(e.target.value) || 2) * 10 }))}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-center text-xs font-bold text-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        min="1"
+                        max="50"
+                        step="0.1"
                       />
                     </div>
 
-                    {strokeEnabled && (
-                      <>
-                        <div>
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Grosor de Contorno</span>
-                            <span className="text-xs font-mono font-bold text-cyan-400">{strokeWidth} mm</span>
-                          </div>
-                          <input 
-                            type="range" 
-                            min="0.5" 
-                            max="10" 
-                            step="0.5"
-                            value={strokeWidth} 
-                            onChange={(e) => setStrokeWidth(parseFloat(e.target.value))}
-                            className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                          />
-                        </div>
-
-                        <div>
-                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2 font-sans">Color del Contorno</span>
-                          <div className="flex gap-2 mb-3">
-                            <input 
-                              type="color" 
-                              value={strokeColor} 
-                              onChange={(e) => setStrokeColor(e.target.value)}
-                              className="w-10 h-10 rounded-xl cursor-pointer bg-transparent border-none overflow-hidden"
-                            />
-                            <input 
-                              type="text" 
-                              value={strokeColor} 
-                              onChange={(e) => setStrokeColor(e.target.value)}
-                              className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-100 uppercase"
-                            />
-                          </div>
-
-                          <div className="flex gap-1.5 flex-wrap">
-                            {[
-                              { hex: '#ffffff', label: 'Blanco' },
-                              { hex: '#ff00ff', label: 'Corte (Magenta)' },
-                              { hex: '#00ffff', label: 'Cian' },
-                              { hex: '#ffff00', label: 'Amarillo' },
-                              { hex: '#ff0000', label: 'Rojo' },
-                              { hex: '#00ff00', label: 'Verde' }
-                            ].map(color => (
-                              <button
-                                key={color.hex}
-                                type="button"
-                                onClick={() => setStrokeColor(color.hex)}
-                                className="w-7 h-7 rounded-lg border border-slate-800 transition-transform hover:scale-110 shrink-0 focus:outline-none"
-                                style={{ backgroundColor: color.hex }}
-                                title={`${color.label}: ${color.hex}`}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      </>
-                    )}
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-semibold block mb-1">Copias:</label>
+                      <div className="flex items-center justify-between bg-slate-900 p-1 rounded-lg border border-slate-800">
+                        <button 
+                          onClick={() => setEditorEffects(prev => ({ ...prev, quantity: Math.max(1, prev.quantity - 1) }))}
+                          className="w-6 h-6 flex items-center justify-center bg-slate-950 rounded hover:text-white text-slate-400 font-bold"
+                        >
+                          -
+                        </button>
+                        <span className="font-black text-slate-100 text-xs w-6 text-center">{editorEffects.quantity}</span>
+                        <button 
+                          onClick={() => setEditorEffects(prev => ({ ...prev, quantity: prev.quantity + 1 }))}
+                          className="w-6 h-6 flex items-center justify-center bg-slate-950 rounded hover:text-white text-slate-400 font-bold"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                )}
 
-                {/* Calculadora de Costos del Sticker Editado */}
-                <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 text-[11px] font-sans">
-                  <span className="text-slate-400">Costo Estimado de Producción (Este Sticker):</span>
-                  <div className="text-lg font-black text-emerald-400 mt-1">
-                    {currencySymbol}{calcularCostoStickerCm2(editingImage?.targetSize || 40, (editingImage?.targetSize || 40) / editedAspectRatio)}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-semibold block mb-1">Ajustar por:</label>
+                      <select 
+                        value={editorEffects.sizingMode} 
+                        onChange={(e) => setEditorEffects(prev => ({ ...prev, sizingMode: e.target.value }))}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-slate-200 text-[11px] focus:outline-none cursor-pointer"
+                      >
+                        <option value="max">Lado mayor</option>
+                        <option value="width">Ancho fijo</option>
+                        <option value="height">Alto fijo</option>
+                        <option value="theme-preset">Medida de Temática</option>
+                        <option value="exact">Medida Personalizada Exacta</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-semibold block mb-1">Temática:</label>
+                      <select 
+                        value={editorEffects.theme} 
+                        onChange={(e) => setEditorEffects(prev => ({ ...prev, theme: e.target.value }))}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-slate-200 text-[11px] focus:outline-none cursor-pointer"
+                      >
+                        {themes.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} ({t.defaultWidth/10}x{t.defaultHeight/10}cm)</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
+
+                  {/* === CAMPOS DINÁMICOS DE MEDIDA EXACTA INDEPENDIENTE === */}
+                  {editorEffects.sizingMode === 'exact' && (
+                    <div className="grid grid-cols-2 gap-3 pt-2.5 border-t border-slate-900 animate-fade-in">
+                      <div>
+                        <label className="text-[9px] text-slate-400 font-semibold block mb-1">Ancho Exacto (cm):</label>
+                        <input 
+                          type="number" 
+                          value={editorEffects.customWidth / 10} 
+                          onChange={(e) => setEditorEffects(prev => ({ ...prev, customWidth: (parseFloat(e.target.value) || 2) * 10 }))}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-center text-xs font-bold text-slate-100"
+                          step="0.1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-slate-400 font-semibold block mb-1">Alto Exacto (cm):</label>
+                        <input 
+                          type="number" 
+                          value={editorEffects.customHeight / 10} 
+                          onChange={(e) => setEditorEffects(prev => ({ ...prev, customHeight: (parseFloat(e.target.value) || 2) * 10 }))}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-center text-xs font-bold text-slate-100"
+                          step="0.1"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* INFO DE TAMAÑO AUTO-APLICADO POR TEMÁTICA */}
+                  {editorEffects.sizingMode === 'theme-preset' && (
+                    <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-800 text-[10px] text-violet-400 animate-fade-in font-medium">
+                      💡 Forzado a la medida de la planchita: <strong>{themePresetForCalc.defaultWidth / 10} x {themePresetForCalc.defaultHeight / 10} cm</strong>
+                    </div>
+                  )}
                 </div>
 
-                <button
-                  onClick={restoreOriginalImage}
-                  className="py-2.5 px-4 bg-red-950/40 hover:bg-red-950/60 border border-red-900/60 text-red-300 rounded-xl text-xs font-bold transition-colors w-full focus:outline-none animate-none cursor-pointer"
-                >
-                  ↩ Deshacer Ediciones y Restablecer
-                </button>
-              </div>
+                {/* BLOQUE B: REMOCIÓN DE FONDO */}
+                <div className="bg-slate-950/50 border border-slate-850 rounded-2xl p-4 flex flex-col gap-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-black text-slate-200 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                      1. Eliminar Fondo de Color
+                    </span>
+                    <input 
+                      type="checkbox"
+                      checked={editorEffects.removeBg}
+                      onChange={(e) => setEditorEffects(prev => ({ ...prev, removeBg: e.target.checked }))}
+                      className="rounded border-slate-800 text-emerald-500 focus:ring-0 bg-slate-950 cursor-pointer w-4 h-4"
+                    />
+                  </div>
 
-              <div className="md:col-span-2 flex flex-col gap-2 overflow-hidden justify-center items-center">
-                <span className="text-xs font-bold text-slate-500 self-start mb-1 font-sans">Previsualización del Sticker (Haz clic sobre el fondo para remover):</span>
-                <div className="flex-1 w-full bg-slate-950 border border-slate-800 rounded-2xl relative flex items-center justify-center p-4 checkboard-pattern overflow-auto">
-                  {removalPreviewUrl && (
-                    <div className="relative max-w-full max-h-[45vh] flex items-center justify-center">
-                      <img 
-                        src={removalPreviewUrl} 
-                        alt="Preview" 
-                        onClick={handleCanvasClick}
-                        className="max-w-full max-h-[45vh] object-contain cursor-crosshair rounded-lg hover:ring-2 hover:ring-cyan-500/50 transition-all"
-                        title="Haz clic sobre cualquier color para removerlo del fondo"
-                      />
-                      {/* Bounding Box del Crop Manual */}
-                      {cropEnabled && activeTab === 'crop' && (
-                        <div 
-                          className="absolute border-2 border-dashed border-amber-500 bg-amber-500/10 cursor-move"
-                          style={{
-                            left: `${cropBox.x}%`,
-                            top: `${cropBox.y}%`,
-                            width: `${cropBox.width}%`,
-                            height: `${cropBox.height}%`
-                          }}
-                          onMouseDown={handleCropMouseDown}
-                          onMouseMove={handleCropMouseMove}
-                          onMouseUp={() => setIsDraggingCrop(false)}
-                          onMouseLeave={() => setIsDraggingCrop(false)}
-                        >
-                          <span className="absolute -top-5 left-0 bg-amber-500 text-slate-950 text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-md uppercase select-none">Área de Corte</span>
+                  {editorEffects.removeBg && (
+                    <div className="flex flex-col gap-3 pt-2 border-t border-slate-900 animate-fade-in text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Color a eliminar:</span>
+                        <div className="flex items-center gap-1.5">
+                          <input 
+                            type="color" 
+                            value={editorEffects.bgTargetColor}
+                            onChange={(e) => setEditorEffects(prev => ({ ...prev, bgTargetColor: e.target.value }))}
+                            className="w-7 h-7 rounded border-0 cursor-pointer overflow-hidden bg-transparent"
+                          />
+                          <input 
+                            type="text" 
+                            value={editorEffects.bgTargetColor.toUpperCase()}
+                            onChange={(e) => setEditorEffects(prev => ({ ...prev, bgTargetColor: e.target.value }))}
+                            className="w-16 bg-slate-900 border border-slate-800 text-center py-1 rounded text-[10px] font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <div className="flex justify-between text-[10px] text-slate-400">
+                          <span>Tolerancia de filtro:</span>
+                          <span className="font-mono text-cyan-400">{editorEffects.bgTolerance} px</span>
+                        </div>
+                        <input 
+                          type="range"
+                          min="10"
+                          max="180"
+                          value={editorEffects.bgTolerance}
+                          onChange={(e) => setEditorEffects(prev => ({ ...prev, bgTolerance: parseInt(e.target.value) }))}
+                          className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* BLOQUE C: CONFIGURACIÓN DE COLOR DTF */}
+                <div className="bg-slate-950/50 border border-slate-850 rounded-2xl p-4 flex flex-col gap-3">
+                  <span className="text-xs font-black text-slate-200 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-violet-400"></span>
+                    2. Configuración de Color DTF
+                  </span>
+
+                  <div className="grid grid-cols-3 gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[10px] font-bold">
+                    <button
+                      onClick={() => setEditorEffects(prev => ({ ...prev, colorMode: 'original' }))}
+                      className={`py-1.5 rounded-lg transition-all ${editorEffects.colorMode === 'original' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      A todo color
+                    </button>
+                    <button
+                      onClick={() => setEditorEffects(prev => ({ ...prev, colorMode: 'one-color' }))}
+                      className={`py-1.5 rounded-lg transition-all ${editorEffects.colorMode === 'one-color' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      1 Color
+                    </button>
+                    <button
+                      onClick={() => setEditorEffects(prev => ({ ...prev, colorMode: 'two-color' }))}
+                      className={`py-1.5 rounded-lg transition-all ${editorEffects.colorMode === 'two-color' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      2 Colores
+                    </button>
+                  </div>
+
+                  {editorEffects.colorMode !== 'original' && (
+                    <div className="flex flex-col gap-2 pt-2 border-t border-slate-900 animate-fade-in text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Color Primario:</span>
+                        <input 
+                          type="color" 
+                          value={editorEffects.primaryColor}
+                          onChange={(e) => setEditorEffects(prev => ({ ...prev, primaryColor: e.target.value }))}
+                          className="w-7 h-7 rounded border-0 cursor-pointer overflow-hidden bg-transparent"
+                        />
+                      </div>
+
+                      {editorEffects.colorMode === 'two-color' && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Color Secundario:</span>
+                          <input 
+                            type="color" 
+                            value={editorEffects.secondaryColor}
+                            onChange={(e) => setEditorEffects(prev => ({ ...prev, secondaryColor: e.target.value }))}
+                            className="w-7 h-7 rounded border-0 cursor-pointer overflow-hidden bg-transparent"
+                          />
                         </div>
                       )}
                     </div>
                   )}
                 </div>
-                <div className="text-[10px] text-slate-400 text-center flex items-center gap-1.5 font-sans">
-                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                  Consejo: Usa "Varita Mágica" y sube el deslizador de "Limpieza de Halo" para borrar impurezas de bordes.
-                </div>
-              </div>
 
-            </div>
+                {/* BLOQUE D: BORDE DE STICKER */}
+                <div className="bg-slate-950/50 border border-slate-850 rounded-2xl p-4 flex flex-col gap-3">
+                  <span className="text-xs font-black text-slate-200 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                    3. Borde de Sticker
+                  </span>
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800 mt-2">
-              <button 
-                onClick={() => setEditingImage(null)}
-                className="py-2 px-5 rounded-xl text-xs font-bold bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-200 focus:outline-none cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button 
-                onClick={saveTransparentImage}
-                className="py-2 px-6 rounded-xl text-xs font-extrabold bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-md shadow-cyan-500/10 focus:outline-none cursor-pointer"
-              >
-                Guardar y Aplicar al Layout
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* ================= MODAL PREMIUM MERCADO PAGO / UPGRADE CON CARACTERÍSTICAS Y PRECIOS COMPLETOS ================= */}
-      {showUpgradeModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 md:p-8 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-start mb-6">
-              <div>
-                <h3 className="text-2xl font-black text-white tracking-tight">Ecosistema de Suscripciones Taller</h3>
-                <p className="text-slate-400 text-xs mt-1">Mejora tu plan para habilitar descargas en lote y las herramientas de edición avanzada.</p>
-              </div>
-              <button 
-                onClick={() => setShowUpgradeModal(false)}
-                className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-xl transition-all focus:outline-none cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {Object.keys(PLANES).filter(key => PLANES[key].premium).map((key) => {
-                const plan = PLANES[key];
-                const esSuscrito = userProfile.plan === key;
-                return (
-                  <div 
-                    key={key} 
-                    className={`border rounded-2xl p-5 flex flex-col justify-between transition-all ${
-                      esSuscrito 
-                        ? 'border-cyan-500 bg-cyan-950/5 shadow-lg shadow-cyan-500/5' 
-                        : 'border-slate-800 bg-slate-900/50 hover:border-slate-750'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <h4 className="font-bold text-slate-200 text-sm uppercase tracking-wide">{plan.nombre}</h4>
-                        {esSuscrito && (
-                          <span className="text-[9px] bg-cyan-950 text-cyan-400 border border-cyan-800 px-2 py-0.5 rounded font-bold uppercase font-mono">Activo</span>
-                        )}
+                  <div className="flex flex-col gap-3 text-xs">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-[10px] text-slate-400">
+                        <span>Grosor del borde:</span>
+                        <span className="font-mono text-cyan-400">{editorEffects.strokeWidth} px</span>
                       </div>
-                      
-                      <div className="my-3">
-                        <span className="text-3xl font-black text-white">{plan.precio}</span>
-                        <span className="text-[10px] text-slate-500 font-mono ml-1">ARS /mes</span>
-                      </div>
-
-                      {/* DETALLE COMPLETO DE LO QUE TRAE CADA PLAN */}
-                      <ul className="text-xs text-slate-400 space-y-2.5 my-4 border-t border-slate-800 pt-4 mb-6">
-                        <li className="flex items-center gap-1.5">
-                          <span className="text-cyan-400 font-bold">✓</span> 
-                          <span>Límite: <strong>{plan.descargasMax === Infinity ? 'Ilimitadas' : `${plan.descargasMax} descargas`}</strong></span>
-                        </li>
-                        <li className="flex items-center gap-1.5">
-                          <span className="text-cyan-400 font-bold">✓</span> 
-                          <span>Filtro de Color: <strong>{key === 'basico' ? '1 Color' : '2 Colores Simultáneos'}</strong></span>
-                        </li>
-                        <li className="flex items-center gap-1.5">
-                          <span className={plan.herramientas.includes("descargar_pdf") ? "text-cyan-400 font-bold" : "text-slate-600"}>✓</span> 
-                          <span className={plan.herramientas.includes("descargar_pdf") ? "text-slate-300" : "text-slate-600"}>Exportar PDF en alta definición</span>
-                        </li>
-                        <li className="flex items-center gap-1.5">
-                          <span className={plan.herramientas.includes("descargar_png") ? "text-cyan-400 font-bold" : "text-slate-600"}>✓</span> 
-                          <span className={plan.herramientas.includes("descargar_png") ? "text-slate-300" : "text-slate-600"}>Descarga de PNG individuales limpios</span>
-                        </li>
-                        <li className="flex items-center gap-1.5">
-                          <span className={plan.herramientas.includes("corte_manual") ? "text-cyan-400 font-bold" : "text-slate-600"}>✓</span> 
-                          <span className={plan.herramientas.includes("corte_manual") ? "text-slate-300" : "text-slate-600"}>Herramienta Crop (Recorte Manual)</span>
-                        </li>
-                        <li className="flex items-center gap-1.5">
-                          <span className={plan.herramientas.includes("offset_borders") ? "text-cyan-400 font-bold" : "text-slate-600"}>✓</span> 
-                          <span className={plan.herramientas.includes("offset_borders") ? "text-slate-300" : "text-slate-600"}>Borde de Sticker offset configurable</span>
-                        </li>
-                      </ul>
+                      <input 
+                        type="range"
+                        min="0"
+                        max="25"
+                        value={editorEffects.strokeWidth}
+                        onChange={(e) => setEditorEffects(prev => ({ ...prev, strokeWidth: parseInt(e.target.value) }))}
+                        className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                      />
                     </div>
 
-                    <div className="space-y-2 mt-auto">
-                      {key === 'avanzado' ? (
-                        <a 
-                          href={plan.link} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="w-full block text-center py-2.5 rounded-xl text-xs font-black bg-linear-to-r from-amber-500 to-orange-500 text-slate-950 hover:opacity-90 transition-all uppercase tracking-wider animate-none"
-                        >
-                          SUSCRIBITE AQUI
-                        </a>
-                      ) : (
-                        <a 
-                          href={plan.link} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="w-full block text-center py-2.5 rounded-xl text-xs font-bold bg-linear-to-r from-cyan-500 to-blue-600 text-slate-950 hover:opacity-90 transition-all"
-                        >
-                          Suscribirse por Mercado Pago
-                        </a>
-                      )}
-                      
-                      <button 
-                        onClick={() => handleSimularPlan(key)}
-                        className="w-full text-center py-1.5 rounded-xl text-[10px] font-mono font-bold text-slate-400 hover:text-white bg-slate-950/80 border border-slate-855 hover:border-slate-700 transition-all focus:outline-none cursor-pointer"
-                      >
-                        ⚡ Simular Activación (Demo)
-                      </button>
-                    </div>
+                    {editorEffects.strokeWidth > 0 && (
+                      <div className="flex items-center justify-between pt-1 animate-fade-in">
+                        <span className="text-slate-400">Color del borde:</span>
+                        <input 
+                          type="color" 
+                          value={editorEffects.strokeColor}
+                          onChange={(e) => setEditorEffects(prev => ({ ...prev, strokeColor: e.target.value }))}
+                          className="w-7 h-7 rounded border-0 cursor-pointer overflow-hidden bg-transparent"
+                        />
+                      </div>
+                    )}
                   </div>
-                );
-              })}
+                </div>
+
+              </div>
             </div>
+
+            {/* Barra de Acciones del Editor */}
+            <div className="bg-slate-950 border-t border-slate-800 px-6 py-4 flex justify-between gap-3 shrink-0">
+              <button
+                onClick={() => setEditingSticker(null)}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-850 text-slate-400 transition-colors cursor-pointer"
+              >
+                Cancelar y Descartar
+              </button>
+
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => downloadSingleSticker(editingSticker)}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-850 border border-slate-800 text-cyan-400 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  📥 Descargar PNG
+                </button>
+                <button
+                  onClick={saveEditorChanges}
+                  className="px-6 py-2 rounded-xl text-xs font-extrabold bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white shadow-lg transition-all transform active:scale-95 cursor-pointer"
+                >
+                  Guardar y Cerrar
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}
-
-      {/* SOLUCIÓN AL BUG DE EDITAR: El canvas ahora se monta globalmente a nivel de raíz fuera del modal con visibilidad oculta, garantizando que previewCanvasRef.current nunca sea null */}
-      <canvas 
-        ref={previewCanvasRef} 
-        className="hidden" 
-        style={{ display: 'none' }}
-      />
-
-      {/* Estilos CSS Auxiliares para el patrón ajedrezado transparente de stickers */}
-      <style>{`
-        .checkboard-pattern {
-          background-image: linear-gradient(45deg, #161e2e 25%, transparent 25%), 
-                            linear-gradient(-45deg, #161e2e 25%, transparent 25%), 
-                            linear-gradient(45deg, transparent 75%, #161e2e 75%), 
-                            linear-gradient(-45deg, transparent 75%, #161e2e 75%);
-          background-size: 14px 14px;
-          background-position: 0 0, 0 7px, 7px -7px, -7px 0px;
-        }
-      `}</style>
 
     </div>
   );
