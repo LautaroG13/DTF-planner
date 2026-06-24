@@ -31,6 +31,9 @@ export default function App() {
   const [pricePerMeter, setPricePerMeter] = useState(12000); // Precio por metro de film
   const [currencySymbol, setCurrencySymbol] = useState('$');
   const [showCutMarks, setShowCutMarks] = useState(true);
+
+  // === SOLUCIÓN AL ERROR: DECLARACIÓN DEL ESTADO DE CONTROL DE CONFIGURACIÓN ===
+  const [isConfigOpen, setIsConfigOpen] = useState(true);
   
   // Estados de edición unificada (Modal)
   const [editingSticker, setEditingSticker] = useState(null); 
@@ -461,39 +464,6 @@ export default function App() {
       }
     };
     tempImg.src = sticker.originalUrl;
-  };
-
-  const saveEditorChanges = () => {
-    if (!editingSticker) return;
-    
-    setPdfProgress('Aplicando cambios de pre-prensa y recorte...');
-    
-    const activeEffects = {
-      ...editorEffects,
-      crop: { ...cropBounds }
-    };
-
-    applyImageEffects(editingSticker, activeEffects, (processedDataUrl, newAspect) => {
-      setImages(prev => prev.map(img => {
-        if (img.id === editingSticker.id) {
-          return {
-            ...img,
-            name: activeEffects.name,
-            quantity: activeEffects.quantity,
-            targetSize: activeEffects.targetSize,
-            sizingMode: activeEffects.sizingMode,
-            theme: activeEffects.theme,
-            customWidth: activeEffects.customWidth,
-            customHeight: activeEffects.customHeight,
-            previewUrl: processedDataUrl,
-            aspectRatio: newAspect,
-            effects: { ...activeEffects }
-          };
-        }
-        return img;
-      }));
-      setEditingSticker(null);
-    });
   };
 
   const recalculateLayout = () => {
@@ -979,187 +949,204 @@ export default function App() {
         {/* PANEL IZQUIERDO: CONFIGURACIONES Y LISTADO EN GRILLA DE STICKERS */}
         <aside className="w-full lg:w-[440px] bg-slate-950 border-r border-slate-800 p-5 flex flex-col gap-5 overflow-y-auto max-h-[calc(100vh-80px)]">
           
-          {/* 1. CONFIGURACIÓN DE PELÍCULA */}
-          <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-inner">
-            <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <svg className="w-4 h-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
-              1. Configuración de Película
+          {/* BOTÓN COLAPSABLE INTERACTIVO DE CONFIGURACIONES GENERALES */}
+          <div className="flex justify-between items-center bg-slate-900/40 p-3 rounded-xl border border-slate-800/80">
+            <h3 className="text-xs font-black text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              ⚙️ CONFIGURACIONES GENERALES
             </h3>
-            
-            <div className="grid grid-cols-2 gap-2 mt-1">
-              <button 
-                onClick={() => { setSheetHeight(1000); }}
-                className={`py-2 px-3 rounded-lg border font-semibold text-xs transition-all ${
-                  sheetHeight === 1000 
-                    ? 'bg-cyan-500/10 border-cyan-500 text-cyan-300 shadow-md' 
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                58 cm x 1 Metro
-              </button>
-              <button 
-                onClick={() => { setSheetHeight(500); }}
-                className={`py-2 px-3 rounded-lg border font-semibold text-xs transition-all ${
-                  sheetHeight === 500 
-                    ? 'bg-cyan-500/10 border-cyan-500 text-cyan-300 shadow-md' 
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                58 cm x 50 cm
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 text-xs mt-1">
-              <div>
-                <label className="text-slate-400 block mb-1">Ancho Imprimible (mm)</label>
-                <input 
-                  type="number" 
-                  value={sheetWidth} 
-                  onChange={(e) => setSheetWidth(parseInt(e.target.value) || 580)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="text-slate-400 block mb-1">Márgen Seguro (mm)</label>
-                <input 
-                  type="number" 
-                  value={safeMargin} 
-                  onChange={(e) => setSafeMargin(parseInt(e.target.value) || 0)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
-                  min="0"
-                  max="50"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <label className="text-slate-400 block mb-1">Espacio de corte (mm)</label>
-                <input 
-                  type="number" 
-                  step="0.5"
-                  value={spacing} 
-                  onChange={(e) => setSpacing(parseFloat(e.target.value) || 0)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
-                  min="1"
-                  max="30"
-                />
-              </div>
-              <div>
-                <label className="text-slate-400 block mb-1">Tamaño Base (cm)</label>
-                <input 
-                  type="number" 
-                  value={globalTargetSize / 10} 
-                  onChange={(e) => setGlobalTargetSize((parseFloat(e.target.value) || 3) * 10)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
-                  min="1"
-                  max="50"
-                />
-              </div>
-            </div>
+            <button 
+              onClick={() => setIsConfigOpen(!isConfigOpen)}
+              className="text-[10px] text-cyan-400 hover:text-cyan-300 font-black bg-slate-800 hover:bg-slate-750 px-2.5 py-1 rounded transition-all cursor-pointer"
+            >
+              {isConfigOpen ? 'OCULTAR ▽' : 'MOSTRAR ▷'}
+            </button>
           </div>
 
-          {/* === 2. TEMÁTICAS DE TRABAJO CON CONFIGURADOR DE MEDIDAS DE PLANCHITA === */}
-          <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3">
-            <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <svg className="w-4 h-4 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
-              2. Planchitas por Temáticas
-            </h3>
-            
-            {/* Lista editable de medidas de temáticas */}
-            <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
-              {themes.map((theme) => (
-                <div key={theme.id} className="flex flex-col gap-1 p-2 bg-slate-950 border border-slate-850 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: theme.color }}></span>
-                      <span className="text-[11px] font-extrabold text-slate-200 truncate">{theme.name}</span>
-                    </div>
+          {isConfigOpen && (
+            <div className="flex flex-col gap-4 animate-fade-in">
+              {/* 1. CONFIGURACIÓN DE PELÍCULA */}
+              <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-inner">
+                <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <svg className="w-4 h-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
+                  1. Configuración de Película
+                </h3>
+                
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <button 
+                    onClick={() => { setSheetHeight(1000); }}
+                    className={`py-2 px-3 rounded-lg border font-semibold text-xs transition-all ${
+                      sheetHeight === 1000 
+                        ? 'bg-cyan-500/10 border-cyan-500 text-cyan-300 shadow-md' 
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    58 cm x 1 Metro
+                  </button>
+                  <button 
+                    onClick={() => { setSheetHeight(500); }}
+                    className={`py-2 px-3 rounded-lg border font-semibold text-xs transition-all ${
+                      sheetHeight === 500 
+                        ? 'bg-cyan-500/10 border-cyan-500 text-cyan-300 shadow-md' 
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    58 cm x 50 cm
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-xs mt-1">
+                  <div>
+                    <label className="text-slate-400 block mb-1">Ancho Imprimible (mm)</label>
+                    <input 
+                      type="number" 
+                      value={sheetWidth} 
+                      onChange={(e) => setSheetWidth(parseInt(e.target.value) || 580)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
+                    />
                   </div>
-                  
-                  <div className="grid grid-cols-2 gap-2 text-[9px] text-slate-400 mt-0.5">
+                  <div>
+                    <label className="text-slate-400 block mb-1">Márgen Seguro (mm)</label>
+                    <input 
+                      type="number" 
+                      value={safeMargin} 
+                      onChange={(e) => setSafeMargin(parseInt(e.target.value) || 0)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
+                      min="0"
+                      max="50"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="text-slate-400 block mb-1">Espacio de corte (mm)</label>
+                    <input 
+                      type="number" 
+                      step="0.5"
+                      value={spacing} 
+                      onChange={(e) => setSpacing(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
+                      min="1"
+                      max="30"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1">Tamaño Base (cm)</label>
+                    <input 
+                      type="number" 
+                      value={globalTargetSize / 10} 
+                      onChange={(e) => setGlobalTargetSize((parseFloat(e.target.value) || 3) * 10)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
+                      min="1"
+                      max="50"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. PLACHITAS POR TEMÁTICAS */}
+              <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-inner">
+                <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <svg className="w-4 h-4 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+                  2. Planchitas por Temáticas
+                </h3>
+                
+                {/* Lista editable de medidas de temáticas */}
+                <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
+                  {themes.map((theme) => (
+                    <div key={theme.id} className="flex flex-col gap-1 p-2 bg-slate-950 border border-slate-850 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: theme.color }}></span>
+                          <span className="text-[11px] font-extrabold text-slate-200 truncate">{theme.name}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-2 text-[9px] text-slate-400 mt-0.5">
+                        <div>
+                          <span className="block mb-0.5">Plancha Ancho (cm):</span>
+                          <input 
+                            type="number"
+                            value={theme.defaultWidth / 10}
+                            onChange={(e) => {
+                              const val = (parseFloat(e.target.value) || 1) * 10;
+                              setThemes(prev => prev.map(t => t.id === theme.id ? { ...t, defaultWidth: val } : t));
+                            }}
+                            className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-slate-100 text-center font-bold font-mono"
+                          />
+                        </div>
+                        <div>
+                          <span className="block mb-0.5">Plancha Alto (cm):</span>
+                          <input 
+                            type="number"
+                            value={theme.defaultHeight / 10}
+                            onChange={(e) => {
+                              const val = (parseFloat(e.target.value) || 1) * 10;
+                              setThemes(prev => prev.map(t => t.id === theme.id ? { ...t, defaultHeight: val } : t));
+                            }}
+                            className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-slate-100 text-center font-bold font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Formulario de creación de temática */}
+                <form onSubmit={addTheme} className="flex flex-col gap-2 mt-1 border-t border-slate-900 pt-2.5">
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      placeholder="Nueva temática..." 
+                      value={newThemeName}
+                      onChange={(e) => setNewThemeName(e.target.value)}
+                      className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:ring-1 focus:ring-violet-500 focus:outline-none"
+                    />
+                    <input 
+                      type="color" 
+                      value={newThemeColor}
+                      onChange={(e) => setNewThemeColor(e.target.value)}
+                      className="w-8 h-8 rounded-lg bg-transparent border-0 cursor-pointer overflow-hidden"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400">
                     <div>
-                      <span className="block mb-0.5">Plancha Ancho (cm):</span>
+                      <label className="block mb-1 font-semibold">Ancho Plancha (cm):</label>
                       <input 
-                        type="number"
-                        value={theme.defaultWidth / 10}
-                        onChange={(e) => {
-                          const val = (parseFloat(e.target.value) || 1) * 10;
-                          setThemes(prev => prev.map(t => t.id === theme.id ? { ...t, defaultWidth: val } : t));
-                        }}
-                        className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-slate-100 text-center font-bold font-mono"
+                        type="number" 
+                        value={newThemeWidth}
+                        onChange={(e) => setNewThemeWidth(parseFloat(e.target.value) || 1)}
+                        min="1"
+                        max="50"
+                        step="0.5"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-xs font-bold text-slate-100 font-mono"
                       />
                     </div>
                     <div>
-                      <span className="block mb-0.5">Plancha Alto (cm):</span>
+                      <label className="block mb-1 font-semibold">Alto Plancha (cm):</label>
                       <input 
-                        type="number"
-                        value={theme.defaultHeight / 10}
-                        onChange={(e) => {
-                          const val = (parseFloat(e.target.value) || 1) * 10;
-                          setThemes(prev => prev.map(t => t.id === theme.id ? { ...t, defaultHeight: val } : t));
-                        }}
-                        className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-slate-100 text-center font-bold font-mono"
+                        type="number" 
+                        value={newThemeHeight}
+                        onChange={(e) => setNewThemeHeight(parseFloat(e.target.value) || 1)}
+                        min="1"
+                        max="50"
+                        step="0.5"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-xs font-bold text-slate-100 font-mono"
                       />
                     </div>
                   </div>
-                </div>
-              ))}
+
+                  <button 
+                    type="submit"
+                    className="w-full bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white text-xs py-1.5 rounded-lg transition-colors font-bold mt-1 cursor-pointer"
+                  >
+                    + Crear Temática
+                  </button>
+                </form>
+              </div>
             </div>
-
-            {/* Formulario de creación de temática */}
-            <form onSubmit={addTheme} className="flex flex-col gap-2 mt-1 border-t border-slate-900 pt-2.5">
-              <div className="flex gap-2">
-                <input 
-                  type="text" 
-                  placeholder="Nueva temática..." 
-                  value={newThemeName}
-                  onChange={(e) => setNewThemeName(e.target.value)}
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:ring-1 focus:ring-violet-500 focus:outline-none"
-                />
-                <input 
-                  type="color" 
-                  value={newThemeColor}
-                  onChange={(e) => setNewThemeColor(e.target.value)}
-                  className="w-8 h-8 rounded-lg bg-transparent border-0 cursor-pointer overflow-hidden"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400">
-                <div>
-                  <label className="block mb-1 font-semibold">Ancho Plancha (cm):</label>
-                  <input 
-                    type="number" 
-                    value={newThemeWidth}
-                    onChange={(e) => setNewThemeWidth(parseFloat(e.target.value) || 1)}
-                    min="1"
-                    max="50"
-                    step="0.5"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-xs font-bold text-slate-100 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1 font-semibold">Alto Plancha (cm):</label>
-                  <input 
-                    type="number" 
-                    value={newThemeHeight}
-                    onChange={(e) => setNewThemeHeight(parseFloat(e.target.value) || 1)}
-                    min="1"
-                    max="50"
-                    step="0.5"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 text-xs font-bold text-slate-100 font-mono"
-                  />
-                </div>
-              </div>
-
-              <button 
-                type="submit"
-                className="w-full bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white text-xs py-1.5 rounded-lg transition-colors font-bold mt-1 cursor-pointer"
-              >
-                + Crear Temática
-              </button>
-            </form>
-          </div>
+          )}
 
           {/* 3. SUBIR IMÁGENES */}
           <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3">
@@ -1216,7 +1203,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* 4. LISTADO EN GRILLA DE STICKERS CARGADOS (MÁXIMO APROVECHAMIENTO) */}
+          {/* 4. LISTADO EN GRILLA DE STICKERS CARGADOS */}
           <div className="flex-1 flex flex-col gap-3 min-h-[300px]">
             <div className="flex justify-between items-center bg-slate-900/30 p-2 rounded-xl border border-slate-800/60">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">
