@@ -9,6 +9,71 @@ const INITIAL_THEMES = [
   { id: 't_general', name: 'General', color: '#6B7280', defaultWidth: 400, defaultHeight: 200 } // Planchita de 40 x 20 cm
 ];
 
+// === HELPERS DE COLOR E IMAGEN (usados por la herramienta de fondo/borde) ===
+const hexToRgb = (hex) => {
+  const clean = (hex || '#ffffff').replace('#', '').trim();
+  const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean;
+  const bigint = parseInt(full, 16) || 0;
+  return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
+};
+
+const rgbToHex = (r, g, b) => '#' + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+
+// Elimina el fondo solo en la región conectada a los bordes de la imagen (protege detalles internos del mismo color)
+// y suaviza la transición con un "feather" en vez de un corte binario duro.
+const floodFillRemoveBackground = (data, width, height, target, tolerance, feather) => {
+  const total = width * height;
+  const queued = new Uint8Array(total);
+  const stack = [];
+  const pushIdx = (idx) => { if (!queued[idx]) { queued[idx] = 1; stack.push(idx); } };
+
+  for (let x = 0; x < width; x++) {
+    pushIdx(x);
+    pushIdx((height - 1) * width + x);
+  }
+  for (let y = 0; y < height; y++) {
+    pushIdx(y * width);
+    pushIdx(y * width + (width - 1));
+  }
+
+  const maxDist = tolerance + feather;
+  while (stack.length) {
+    const idx = stack.pop();
+    const p = idx * 4;
+    const dr = data[p] - target.r;
+    const dg = data[p + 1] - target.g;
+    const db = data[p + 2] - target.b;
+    const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+    if (dist > maxDist) continue;
+
+    const factor = dist <= tolerance ? 0 : (dist - tolerance) / feather;
+    data[p + 3] = Math.round(data[p + 3] * factor);
+
+    const x = idx % width;
+    if (x > 0) pushIdx(idx - 1);
+    if (x < width - 1) pushIdx(idx + 1);
+    if (idx - width >= 0) pushIdx(idx - width);
+    if (idx + width < total) pushIdx(idx + width);
+  }
+};
+
+// Elimina cualquier píxel similar al color elegido, esté o no conectado al borde. Con suavizado de transición.
+const globalRemoveBackground = (data, target, tolerance, feather) => {
+  const maxDist = tolerance + feather;
+  for (let i = 0; i < data.length; i += 4) {
+    const dr = data[i] - target.r;
+    const dg = data[i + 1] - target.g;
+    const db = data[i + 2] - target.b;
+    const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+    if (dist <= tolerance) {
+      data[i + 3] = 0;
+    } else if (dist <= maxDist) {
+      const factor = (dist - tolerance) / feather;
+      data[i + 3] = Math.round(data[i + 3] * factor);
+    }
+  }
+};
+
 export default function App() {
   const [images, setImages] = useState([]);
   const [themes, setThemes] = useState(INITIAL_THEMES);
@@ -57,13 +122,16 @@ export default function App() {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfProgress, setPdfProgress] = useState('');
   const [isDragging, setIsDragging] = useState(false);
+  const [eyedropperActive, setEyedropperActive] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null); // { total, done } mientras se procesan varias imágenes
 
   // Estado temporal de efectos para el sticker en edición
   const [editorEffects, setEditorEffects] = useState({
     removeBg: false,
+    bgMode: 'flood',
     bgTargetColor: '#ffffff',
     bgTolerance: 40,
-    colorMode: 'original', 
+    colorMode: 'original',
     primaryColor: '#ffffff',
     secondaryColor: '#000000',
     strokeWidth: 0, 
@@ -209,9 +277,23 @@ export default function App() {
   };
 
   const processFiles = (files) => {
-    files.forEach(file => {
-      if (!file.type.startsWith('image/')) return;
-      
+    const validFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (validFiles.length === 0) return;
+
+    setUploadProgress({ total: validFiles.length, done: 0 });
+
+    const markOneDone = () => {
+      setUploadProgress(prev => {
+        if (!prev) return prev;
+        const done = prev.done + 1;
+        if (done >= prev.total) {
+          setTimeout(() => setUploadProgress(null), 700);
+        }
+        return { ...prev, done };
+      });
+    };
+
+    validFiles.forEach(file => {
       const reader = new FileReader();
       reader.onload = (event) => {
         const img = new Image();
@@ -221,19 +303,20 @@ export default function App() {
           const newImg = {
             id: newImgId,
             name: file.name.split('.')[0],
-            previewUrl: event.target.result, 
-            originalUrl: event.target.result, 
+            previewUrl: event.target.result,
+            originalUrl: event.target.result,
             aspectRatio: aspectRatio,
             originalWidth: img.width,
             originalHeight: img.height,
             theme: selectedThemeForUpload,
-            quantity: 1, 
-            sizingMode: 'max', 
-            targetSize: globalTargetSize, 
-            customWidth: globalTargetSize, 
-            customHeight: Math.round(globalTargetSize / aspectRatio), 
+            quantity: 1,
+            sizingMode: 'max',
+            targetSize: globalTargetSize,
+            customWidth: globalTargetSize,
+            customHeight: Math.round(globalTargetSize / aspectRatio),
             effects: {
               removeBg: false,
+              bgMode: 'flood',
               bgTargetColor: '#ffffff',
               bgTolerance: 40,
               colorMode: 'original',
@@ -245,9 +328,12 @@ export default function App() {
             }
           };
           setImages(prev => [...prev, newImg]);
+          markOneDone();
         };
+        img.onerror = markOneDone;
         img.src = event.target.result;
       };
+      reader.onerror = markOneDone;
       reader.readAsDataURL(file);
     });
   };
@@ -294,6 +380,7 @@ export default function App() {
         customHeight: 40,
         effects: {
           removeBg: false,
+          bgMode: 'flood',
           bgTargetColor: '#ffffff',
           bgTolerance: 40,
           colorMode: 'original',
@@ -314,140 +401,190 @@ export default function App() {
     tempImg.onload = () => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
-      
+
       const crop = effectsConfig.crop || { top: 0, bottom: 0, left: 0, right: 0 };
       const startX = Math.round((crop.left / 100) * tempImg.width);
       const startY = Math.round((crop.top / 100) * tempImg.height);
       const cutWidth = Math.round(tempImg.width * (1 - (crop.left + crop.right) / 100));
       const cutHeight = Math.round(tempImg.height * (1 - (crop.top + crop.bottom) / 100));
-      
+
       canvas.width = cutWidth > 0 ? cutWidth : tempImg.width;
       canvas.height = cutHeight > 0 ? cutHeight : tempImg.height;
-      
+
       ctx.drawImage(
-        tempImg, 
-        startX, startY, canvas.width, canvas.height, 
-        0, 0, canvas.width, canvas.height           
+        tempImg,
+        startX, startY, canvas.width, canvas.height,
+        0, 0, canvas.width, canvas.height
       );
-      
+
       let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       let data = imgData.data;
-      
+
       if (effectsConfig.removeBg) {
-        const hex = effectsConfig.bgTargetColor || '#ffffff';
-        const targetR = parseInt(hex.slice(1, 3), 16);
-        const targetG = parseInt(hex.slice(3, 5), 16);
-        const targetB = parseInt(hex.slice(5, 7), 16);
+        const target = hexToRgb(effectsConfig.bgTargetColor || '#ffffff');
         const tolerance = effectsConfig.bgTolerance || 40;
-        
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i+1];
-          const b = data[i+2];
-          
-          const dist = Math.sqrt(
-            Math.pow(r - targetR, 2) +
-            Math.pow(g - targetG, 2) +
-            Math.pow(b - targetB, 2)
-          );
-          
-          if (dist < tolerance) {
-            data[i+3] = 0; 
-          }
+        // Suavizado de borde proporcional a la tolerancia: evita el recorte "dentado" del método anterior.
+        const feather = Math.max(6, tolerance * 0.35);
+
+        if (effectsConfig.bgMode === 'global') {
+          globalRemoveBackground(data, target, tolerance, feather);
+        } else {
+          floodFillRemoveBackground(data, canvas.width, canvas.height, target, tolerance, feather);
         }
       }
-      
+
       if (effectsConfig.colorMode === 'one-color') {
-        const pColor = effectsConfig.primaryColor || '#ffffff';
-        const pr = parseInt(pColor.slice(1, 3), 16);
-        const pg = parseInt(pColor.slice(3, 5), 16);
-        const pb = parseInt(pColor.slice(5, 7), 16);
-        
+        const p = hexToRgb(effectsConfig.primaryColor || '#ffffff');
+
         for (let i = 0; i < data.length; i += 4) {
           if (data[i+3] > 10) {
-            data[i] = pr;
-            data[i+1] = pg;
-            data[i+2] = pb;
+            data[i] = p.r;
+            data[i+1] = p.g;
+            data[i+2] = p.b;
           }
         }
       } else if (effectsConfig.colorMode === 'two-color') {
-        const pColor = effectsConfig.primaryColor || '#ffffff';
-        const sColor = effectsConfig.secondaryColor || '#000000';
-        
-        const pr = parseInt(pColor.slice(1, 3), 16);
-        const pg = parseInt(pColor.slice(3, 5), 16);
-        const pb = parseInt(pColor.slice(5, 7), 16);
-        
-        const sr = parseInt(sColor.slice(1, 3), 16);
-        const sg = parseInt(sColor.slice(3, 5), 16);
-        const sb = parseInt(sColor.slice(5, 7), 16);
-        
+        const p = hexToRgb(effectsConfig.primaryColor || '#ffffff');
+        const s = hexToRgb(effectsConfig.secondaryColor || '#000000');
+
         for (let i = 0; i < data.length; i += 4) {
           if (data[i+3] > 10) {
             const l = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
             if (l > 128) {
-              data[i] = pr; data[i+1] = pg; data[i+2] = pb;
+              data[i] = p.r; data[i+1] = p.g; data[i+2] = p.b;
             } else {
-              data[i] = sr; data[i+1] = sg; data[i+2] = sb;
+              data[i] = s.r; data[i+1] = s.g; data[i+2] = s.b;
             }
           }
         }
       }
-      
+
       ctx.putImageData(imgData, 0, 0);
-      
+
       if (effectsConfig.strokeWidth > 0) {
-        const strokeCanvas = document.createElement('canvas');
-        const sCtx = strokeCanvas.getContext('2d');
-        
-        strokeCanvas.width = canvas.width;
-        strokeCanvas.height = canvas.height;
-        
-        const maxBorderPx = Math.min(50, effectsConfig.strokeWidth * (Math.max(canvas.width, canvas.height) / 300));
-        const scaleX = (canvas.width - maxBorderPx * 2) / canvas.width;
-        const scaleY = (canvas.height - maxBorderPx * 2) / canvas.height;
-        const scale = Math.min(scaleX, scaleY, 0.98);
-        
-        const drawW = canvas.width * scale;
-        const drawH = canvas.height * scale;
-        const drawX = (canvas.width - drawW) / 2;
-        const drawY = (canvas.height - drawH) / 2;
-        
+        // El borde ahora EXPANDE el lienzo en vez de encoger el diseño original: se conserva
+        // toda la resolución/nitidez del arte, y el contorno queda perfectamente centrado.
+        const rawBorder = effectsConfig.strokeWidth * (Math.max(canvas.width, canvas.height) / 300);
+        const borderPx = Math.max(1, Math.min(140, Math.round(rawBorder)));
+
+        const finalCanvas = document.createElement('canvas');
+        finalCanvas.width = canvas.width + borderPx * 2;
+        finalCanvas.height = canvas.height + borderPx * 2;
+        const fCtx = finalCanvas.getContext('2d');
+
+        // Silueta sólida del color de borde, ya ubicada en su posición final dentro del lienzo expandido.
         const silCanvas = document.createElement('canvas');
+        silCanvas.width = finalCanvas.width;
+        silCanvas.height = finalCanvas.height;
         const silCtx = silCanvas.getContext('2d');
-        silCanvas.width = canvas.width;
-        silCanvas.height = canvas.height;
-        
-        silCtx.drawImage(canvas, drawX, drawY, drawW, drawH);
-        
+        silCtx.drawImage(canvas, borderPx, borderPx);
+
         const silData = silCtx.getImageData(0, 0, silCanvas.width, silCanvas.height);
         const sD = silData.data;
-        const stColor = effectsConfig.strokeColor || '#ffffff';
-        const str = parseInt(stColor.slice(1, 3), 16);
-        const stg = parseInt(stColor.slice(3, 5), 16);
-        const stb = parseInt(stColor.slice(5, 7), 16);
-        
+        const stroke = hexToRgb(effectsConfig.strokeColor || '#ffffff');
         for (let i = 0; i < sD.length; i += 4) {
           if (sD[i+3] > 10) {
-            sD[i] = str; sD[i+1] = stg; sD[i+2] = stb; sD[i+3] = 255;
+            sD[i] = stroke.r; sD[i+1] = stroke.g; sD[i+2] = stroke.b; sD[i+3] = 255;
           }
         }
         silCtx.putImageData(silData, 0, 0);
-        
-        for (let angle = 0; angle < 360; angle += 22.5) {
-          const dx = Math.cos(angle * Math.PI / 180) * maxBorderPx;
-          const dy = Math.sin(angle * Math.PI / 180) * maxBorderPx;
-          sCtx.drawImage(silCanvas, dx, dy);
+
+        // Dilatación circular con paso angular denso (proporcional al radio) para lograr un
+        // contorno continuo y sin huecos, incluso en formas finas o con puntas.
+        const strokeOnlyCanvas = document.createElement('canvas');
+        strokeOnlyCanvas.width = finalCanvas.width;
+        strokeOnlyCanvas.height = finalCanvas.height;
+        const strokeCtx = strokeOnlyCanvas.getContext('2d');
+
+        const steps = Math.max(24, Math.ceil((2 * Math.PI * borderPx) / 2.5));
+        for (let s = 0; s < steps; s++) {
+          const angle = (s / steps) * Math.PI * 2;
+          const dx = Math.cos(angle) * borderPx;
+          const dy = Math.sin(angle) * borderPx;
+          strokeCtx.drawImage(silCanvas, dx, dy);
         }
-        
-        sCtx.drawImage(canvas, drawX, drawY, drawW, drawH);
-        
-        onComplete(strokeCanvas.toDataURL('image/png'), canvas.width / canvas.height);
+        strokeCtx.drawImage(silCanvas, 0, 0);
+
+        // Suavizado leve (antialiasing) del contorno externo antes de superponer el arte original nítido.
+        const smoothCanvas = document.createElement('canvas');
+        smoothCanvas.width = finalCanvas.width;
+        smoothCanvas.height = finalCanvas.height;
+        const smoothCtx = smoothCanvas.getContext('2d');
+        smoothCtx.filter = 'blur(0.7px)';
+        smoothCtx.drawImage(strokeOnlyCanvas, 0, 0);
+
+        fCtx.drawImage(smoothCanvas, 0, 0);
+        fCtx.drawImage(canvas, borderPx, borderPx);
+
+        onComplete(finalCanvas.toDataURL('image/png'), finalCanvas.width / finalCanvas.height);
       } else {
         onComplete(canvas.toDataURL('image/png'), canvas.width / canvas.height);
       }
     };
     tempImg.src = sticker.originalUrl;
+  };
+
+  // Muestrea las esquinas de la imagen original y promedia su color para sugerir el color de fondo a eliminar.
+  const detectBackgroundColor = () => {
+    if (!editingSticker) return;
+    const tempImg = new Image();
+    tempImg.crossOrigin = 'anonymous';
+    tempImg.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = tempImg.width;
+      canvas.height = tempImg.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(tempImg, 0, 0);
+
+      const w = canvas.width, h = canvas.height;
+      const inset = Math.max(1, Math.round(Math.min(w, h) * 0.02));
+      const points = [
+        [inset, inset], [w - 1 - inset, inset],
+        [inset, h - 1 - inset], [w - 1 - inset, h - 1 - inset],
+        [Math.floor(w / 2), inset], [inset, Math.floor(h / 2)]
+      ];
+
+      let r = 0, g = 0, b = 0;
+      points.forEach(([x, y]) => {
+        const d = ctx.getImageData(x, y, 1, 1).data;
+        r += d[0]; g += d[1]; b += d[2];
+      });
+      const n = points.length;
+
+      setEditorEffects(prev => ({
+        ...prev,
+        removeBg: true,
+        bgTargetColor: rgbToHex(r / n, g / n, b / n)
+      }));
+    };
+    tempImg.src = editingSticker.originalUrl;
+  };
+
+  // Cuentagotas: toma el color exacto del píxel clickeado en la imagen original de referencia.
+  const handleEyedropperClick = (e) => {
+    if (!eyedropperActive || !cropContainerRef.current || !editingSticker) return;
+    const rect = cropContainerRef.current.getBoundingClientRect();
+    const relX = (e.clientX - rect.left) / rect.width;
+    const relY = (e.clientY - rect.top) / rect.height;
+    if (relX < 0 || relX > 1 || relY < 0 || relY > 1) return;
+
+    const tempImg = new Image();
+    tempImg.crossOrigin = 'anonymous';
+    tempImg.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = tempImg.width;
+      canvas.height = tempImg.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(tempImg, 0, 0);
+
+      const px = Math.min(canvas.width - 1, Math.max(0, Math.round(relX * canvas.width)));
+      const py = Math.min(canvas.height - 1, Math.max(0, Math.round(relY * canvas.height)));
+      const [r, g, b] = ctx.getImageData(px, py, 1, 1).data;
+
+      setEditorEffects(prev => ({ ...prev, removeBg: true, bgTargetColor: rgbToHex(r, g, b) }));
+      setEyedropperActive(false);
+    };
+    tempImg.src = editingSticker.originalUrl;
   };
 
   // === FUNCIONES FALTANTES QUE CAUSABAN LA PANTALLA BLANCA ===
@@ -476,12 +613,14 @@ export default function App() {
   const openEditorModal = (img) => {
     setEditingSticker(img);
     setCropMode(false);
+    setEyedropperActive(false);
     // Inicializar cropBounds desde los efectos guardados del sticker
     const savedCrop = img.effects?.crop || { top: 0, bottom: 0, left: 0, right: 0 };
     setCropBounds(savedCrop);
     // Cargar efectos guardados del sticker en el editor
     setEditorEffects({
       removeBg: img.effects?.removeBg ?? false,
+      bgMode: img.effects?.bgMode ?? 'flood',
       bgTargetColor: img.effects?.bgTargetColor ?? '#ffffff',
       bgTolerance: img.effects?.bgTolerance ?? 40,
       colorMode: img.effects?.colorMode ?? 'original',
@@ -525,6 +664,7 @@ export default function App() {
           theme: editorEffects.theme,
           effects: {
             removeBg: editorEffects.removeBg,
+            bgMode: editorEffects.bgMode,
             bgTargetColor: editorEffects.bgTargetColor,
             bgTolerance: editorEffects.bgTolerance,
             colorMode: editorEffects.colorMode,
@@ -1305,15 +1445,35 @@ export default function App() {
               </svg>
               <div className="text-xs font-semibold">Arrastra tus archivos de imagen aquí</div>
               <p className="text-[10px] text-slate-500 font-medium">Soporta transparencias PNG y SVG</p>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-                multiple 
-                accept="image/*" 
-                className="hidden" 
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                multiple
+                accept="image/*"
+                className="hidden"
               />
             </div>
+
+            {uploadProgress && (
+              <div className="flex flex-col gap-1.5 bg-slate-950/60 border border-slate-800 rounded-lg p-2.5 animate-fade-in">
+                <div className="flex justify-between items-center text-[10px] font-bold">
+                  <span className="text-cyan-300">
+                    Procesando imágenes... {uploadProgress.done}/{uploadProgress.total}
+                  </span>
+                  <span className="text-slate-500">
+                    {Math.round((uploadProgress.done / uploadProgress.total) * 100)}%
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-cyan-500 to-violet-500 transition-all duration-200"
+                    style={{ width: `${(uploadProgress.done / uploadProgress.total) * 100}%` }}
+                  ></div>
+                </div>
+                <span className="text-[9px] text-slate-500">Se acomodarán automáticamente en la plancha al terminar.</span>
+              </div>
+            )}
           </div>
 
           {/* === STREAMING_CHUNK:Rendering uploaded stickers grid... === */}
@@ -1867,40 +2027,47 @@ export default function App() {
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lienzo Interactivo de Trabajo</span>
                   
                   {/* Botón de Recorte principal */}
-                  <button 
-                    onClick={() => setCropMode(!cropMode)}
+                  <button
+                    onClick={() => { setCropMode(!cropMode); setEyedropperActive(false); }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                      cropMode 
-                        ? 'bg-cyan-500 text-slate-950 font-black shadow-md' 
+                      cropMode
+                        ? 'bg-cyan-500 text-slate-950 font-black shadow-md'
                         : 'bg-slate-850 border border-slate-800 text-slate-200 hover:bg-slate-850'
                     }`}
                   >
                     ✂️ {cropMode ? 'Ajustando Recorte...' : 'Ajustar Recorte'}
                   </button>
                 </div>
-                
+
                 <div className="flex-1 bg-slate-950 rounded-2xl border border-slate-800/80 p-6 flex items-center justify-center relative overflow-hidden min-h-[340px] pattern-bg shadow-inner">
-                  
+
                   {/* === ENTORNO DE RECORTE CON TIRADORES REALES === */}
-                  <div 
+                  <div
                     ref={cropContainerRef}
-                    className="relative max-w-full max-h-[340px] select-none"
+                    onClick={handleEyedropperClick}
+                    className={`relative max-w-full max-h-[340px] select-none ${eyedropperActive ? 'cursor-crosshair' : ''}`}
                     style={{ aspectRatio: `${editingSticker.originalWidth || 1} / ${editingSticker.originalHeight || 1}` }}
                   >
-                    {/* Imagen de fondo atenuada de referencia */}
-                    <img 
-                      src={editingSticker.originalUrl} 
-                      alt="Referencia" 
-                      className="max-w-full max-h-[340px] object-contain opacity-25" 
+                    {eyedropperActive && (
+                      <div className="absolute -top-7 left-0 right-0 text-center text-[10px] font-bold text-cyan-300 bg-slate-950/80 border border-cyan-500/40 rounded-lg py-1 z-30 animate-fade-in">
+                        🎯 Hacé clic sobre el color de fondo que querés eliminar
+                      </div>
+                    )}
+
+                    {/* Imagen de fondo atenuada de referencia (a color completo mientras se usa el cuentagotas) */}
+                    <img
+                      src={editingSticker.originalUrl}
+                      alt="Referencia"
+                      className={`max-w-full max-h-[340px] object-contain transition-opacity ${eyedropperActive ? 'opacity-100' : 'opacity-25'}`}
                       draggable={false}
                     />
 
                     {/* Imagen principal que se renderiza */}
-                    {!cropMode && (
-                      <img 
-                        src={localPreviewUrl || editingSticker.previewUrl} 
-                        alt="Resultado" 
-                        className="absolute inset-0 w-full h-full object-contain filter drop-shadow-xl animate-fade-in" 
+                    {!cropMode && !eyedropperActive && (
+                      <img
+                        src={localPreviewUrl || editingSticker.previewUrl}
+                        alt="Resultado"
+                        className="absolute inset-0 w-full h-full object-contain filter drop-shadow-xl animate-fade-in"
                         draggable={false}
                       />
                     )}
@@ -2103,9 +2270,9 @@ export default function App() {
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-black text-slate-200 flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                      1. Eliminar Fondo de Color
+                      1. Eliminar Fondo
                     </span>
-                    <input 
+                    <input
                       type="checkbox"
                       checked={editorEffects.removeBg}
                       onChange={(e) => setEditorEffects(prev => ({ ...prev, removeBg: e.target.checked }))}
@@ -2115,17 +2282,36 @@ export default function App() {
 
                   {editorEffects.removeBg && (
                     <div className="flex flex-col gap-3 pt-2 border-t border-slate-900 animate-fade-in text-xs">
+
+                      {/* Modo de detección: flood-fill desde bordes vs. color global */}
+                      <div className="grid grid-cols-2 gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[10px] font-bold">
+                        <button
+                          onClick={() => setEditorEffects(prev => ({ ...prev, bgMode: 'flood' }))}
+                          title="Solo borra el fondo conectado a los bordes de la imagen: protege detalles internos del mismo color (ej. ojos blancos, texto)"
+                          className={`py-1.5 rounded-lg transition-all ${editorEffects.bgMode !== 'global' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                          Bordes conectados
+                        </button>
+                        <button
+                          onClick={() => setEditorEffects(prev => ({ ...prev, bgMode: 'global' }))}
+                          title="Borra todos los píxeles parecidos al color elegido, estén o no conectados al borde"
+                          className={`py-1.5 rounded-lg transition-all ${editorEffects.bgMode === 'global' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                          Todo el color
+                        </button>
+                      </div>
+
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400">Color a eliminar:</span>
                         <div className="flex items-center gap-1.5">
-                          <input 
-                            type="color" 
+                          <input
+                            type="color"
                             value={editorEffects.bgTargetColor}
                             onChange={(e) => setEditorEffects(prev => ({ ...prev, bgTargetColor: e.target.value }))}
                             className="w-7 h-7 rounded border-0 cursor-pointer overflow-hidden bg-transparent"
                           />
-                          <input 
-                            type="text" 
+                          <input
+                            type="text"
                             value={editorEffects.bgTargetColor.toUpperCase()}
                             onChange={(e) => setEditorEffects(prev => ({ ...prev, bgTargetColor: e.target.value }))}
                             className="w-16 bg-slate-900 border border-slate-800 text-center py-1 rounded text-[10px] font-mono"
@@ -2133,19 +2319,41 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* Ayudas para encontrar el color exacto sin adivinar */}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={detectBackgroundColor}
+                          className="flex-1 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-violet-300 text-[10px] font-bold py-1.5 rounded-lg transition-colors cursor-pointer"
+                          title="Promedia el color de las esquinas de la imagen original y lo sugiere como color de fondo"
+                        >
+                          🪄 Autodetectar
+                        </button>
+                        <button
+                          onClick={() => { setEyedropperActive(prev => !prev); setCropMode(false); }}
+                          className={`flex-1 text-[10px] font-bold py-1.5 rounded-lg transition-colors cursor-pointer border ${
+                            eyedropperActive
+                              ? 'bg-cyan-500 border-cyan-400 text-slate-950'
+                              : 'bg-slate-900 hover:bg-slate-850 border-slate-800 text-cyan-300'
+                          }`}
+                        >
+                          {eyedropperActive ? '🎯 Hacé clic en la imagen...' : '🎯 Elegir con clic'}
+                        </button>
+                      </div>
+
                       <div className="flex flex-col gap-1">
                         <div className="flex justify-between text-[10px] text-slate-400">
-                          <span>Tolerancia de filtro:</span>
+                          <span>Tolerancia de color:</span>
                           <span className="font-mono text-cyan-400">{editorEffects.bgTolerance} px</span>
                         </div>
-                        <input 
+                        <input
                           type="range"
-                          min="10"
+                          min="5"
                           max="180"
                           value={editorEffects.bgTolerance}
                           onChange={(e) => setEditorEffects(prev => ({ ...prev, bgTolerance: parseInt(e.target.value) }))}
                           className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                         />
+                        <span className="text-[9px] text-slate-500">Los bordes se suavizan automáticamente para evitar recortes dentados.</span>
                       </div>
                     </div>
                   )}
