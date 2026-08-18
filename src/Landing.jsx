@@ -1,53 +1,5 @@
 import React, { useState, useMemo } from 'react';
-
-// === CONTENIDO DE PLANES (solo texto/precios para la landing; el cobro real con Mercado Pago se conecta después) ===
-const PLANS = [
-  {
-    id: 'base',
-    name: 'Base',
-    price: 2000,
-    oldPrice: 10000,
-    tagline: 'Para arrancar y probar la herramienta a fondo.',
-    downloadLimit: '20 descargas por mes',
-    features: [
-      'Empaquetado automático de planchas (por temática o mezclado)',
-      'Subida de imágenes en lote, se acomodan solas',
-      'Recorte y redimensionado por sticker',
-      'Exportación a PDF listo para imprimir',
-    ],
-    highlight: false,
-  },
-  {
-    id: 'medio',
-    name: 'Medio',
-    price: 3000,
-    oldPrice: 15000,
-    tagline: 'El más elegido: suma edición avanzada de imagen.',
-    downloadLimit: '150 descargas por mes',
-    features: [
-      'Todo lo del plan Base',
-      'Eliminación de fondo (bordes conectados + autodetección + cuentagotas)',
-      'Borde / contorno de sticker configurable',
-      'Organización por temáticas ilimitadas',
-    ],
-    highlight: true,
-  },
-  {
-    id: 'premium',
-    name: 'Premium',
-    price: 8000,
-    oldPrice: 45000,
-    tagline: 'Para talleres con volumen alto de impresión.',
-    downloadLimit: 'Descargas ilimitadas',
-    features: [
-      'Todo lo del plan Medio',
-      'Descargas ilimitadas, sin cortes a fin de mes',
-      'Acceso anticipado a las funciones "Próximamente"',
-      'Soporte prioritario por correo electrónico',
-    ],
-    highlight: false,
-  },
-];
+import { PLANS, TRIAL_DAYS } from './plans.js';
 
 // Separación honesta: lo que la herramienta ya hace hoy vs. lo que todavía está en desarrollo.
 const FEATURES_LIVE = [
@@ -74,7 +26,7 @@ const FEATURES_SOON = [
 
 const formatARS = (n) => n.toLocaleString('es-AR', { maximumFractionDigits: 0 });
 
-function Navbar({ onEnterApp }) {
+function Navbar({ user, onEnterApp }) {
   return (
     <nav className="sticky top-0 z-40 backdrop-blur bg-slate-950/80 border-b border-slate-800">
       <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -96,14 +48,14 @@ function Navbar({ onEnterApp }) {
           onClick={onEnterApp}
           className="bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-lg transition-all active:scale-95 cursor-pointer"
         >
-          Probar gratis
+          {user ? 'Ir a la herramienta' : 'Iniciar sesión'}
         </button>
       </div>
     </nav>
   );
 }
 
-function Hero({ onEnterApp }) {
+function Hero({ user, onEnterApp }) {
   return (
     <section className="relative overflow-hidden">
       <div
@@ -128,7 +80,7 @@ function Hero({ onEnterApp }) {
             onClick={onEnterApp}
             className="bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white font-extrabold px-7 py-3.5 rounded-2xl shadow-xl transition-all active:scale-95 cursor-pointer"
           >
-            Probar gratis ahora
+            {user ? 'Ir a la herramienta' : 'Probar gratis ahora'}
           </button>
           <a
             href="#planes"
@@ -137,7 +89,9 @@ function Hero({ onEnterApp }) {
             Ver planes desde $2.000/mes
           </a>
         </div>
-        <p className="mt-4 text-[11px] text-slate-500">Sin tarjeta para probar. Suscripción vía Mercado Pago.</p>
+        <p className="mt-4 text-[11px] text-slate-500">
+          {user ? `Ya tenés sesión iniciada.` : `${TRIAL_DAYS} días de prueba gratis. Después, suscripción vía Mercado Pago.`}
+        </p>
       </div>
     </section>
   );
@@ -352,9 +306,9 @@ function PricingSection({ onEnterApp }) {
       </div>
 
       <p className="text-center text-xs text-slate-500 mt-8">
-        ¿Ya usás la herramienta y querés seguir probando?{' '}
+        ¿Ya tenés cuenta en ImProX?{' '}
         <button onClick={onEnterApp} className="text-cyan-400 hover:text-cyan-300 font-semibold underline cursor-pointer">
-          Entrá gratis acá
+          Entrá acá
         </button>
       </p>
     </section>
@@ -363,10 +317,11 @@ function PricingSection({ onEnterApp }) {
 
 function FAQSection() {
   const faqs = [
+    { q: '¿Necesito crear una cuenta?', a: `Sí. Iniciás sesión con tu correo o con Google, y arrancás automáticamente con ${TRIAL_DAYS} días de prueba gratis con acceso completo a la herramienta.` },
+    { q: '¿Qué pasa cuando se termina la prueba gratis?', a: 'Se bloquea el acceso a la herramienta hasta que te suscribas a alguno de los planes. Tu cuenta y tu sesión no se pierden.' },
     { q: '¿Necesito instalar algo?', a: 'No, ImProX funciona desde el navegador. Subís tus imágenes y trabajás directo desde ahí.' },
     { q: '¿Qué pasa si me quedo sin descargas en el mes?', a: 'Podés esperar al siguiente ciclo o pasarte a un plan superior en cualquier momento.' },
     { q: '¿Cómo pago?', a: 'Con Mercado Pago, con débito automático mensual. Podés cancelar cuando quieras.' },
-    { q: '¿Mis diseños quedan guardados en algún lado?', a: 'Por ahora el trabajo se arma en tu sesión del navegador; el guardado en la nube llega con el login de Google.' },
   ];
   return (
     <section id="faq" className="max-w-3xl mx-auto px-6 py-16 md:py-20">
@@ -407,11 +362,11 @@ function Footer({ onEnterApp }) {
   );
 }
 
-export default function Landing({ onEnterApp }) {
+export default function Landing({ user, onEnterApp }) {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans antialiased">
-      <Navbar onEnterApp={onEnterApp} />
-      <Hero onEnterApp={onEnterApp} />
+      <Navbar user={user} onEnterApp={onEnterApp} />
+      <Hero user={user} onEnterApp={onEnterApp} />
       <FeaturesSection />
       <Calculator />
       <PricingSection onEnterApp={onEnterApp} />
