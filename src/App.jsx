@@ -74,7 +74,7 @@ const globalRemoveBackground = (data, target, tolerance, feather) => {
   }
 };
 
-export default function App() {
+export default function App({ onBackToLanding }) {
   const [images, setImages] = useState([]);
   const [themes, setThemes] = useState(INITIAL_THEMES);
   const [newThemeName, setNewThemeName] = useState('');
@@ -1167,6 +1167,17 @@ export default function App() {
       {/* HEADER PRINCIPAL */}
       <header className="bg-slate-950 border-b border-slate-800 px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
+          {onBackToLanding && (
+            <button
+              onClick={onBackToLanding}
+              title="Volver al inicio"
+              className="hidden md:flex items-center justify-center w-8 h-8 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-white hover:border-slate-700 transition-colors cursor-pointer shrink-0"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          )}
           <div className="bg-gradient-to-tr from-violet-600 to-cyan-500 p-2.5 rounded-xl shadow-inner">
             <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -1174,12 +1185,12 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-xl font-black tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
-              Smart DTF UV Pro Layout
+              ImProX
             </h1>
             <p className="text-xs text-slate-400 font-medium font-mono">Pre-prensa, Distribución Óptima y Grilla Unificada de Stickers</p>
           </div>
         </div>
-        
+
         <div className="flex flex-wrap gap-3 items-center text-sm">
           <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
