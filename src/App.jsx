@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from './firebase.js';
+import Tutorial from './Tutorial.jsx';
 
 // === CONFIGURACIÓN INICIAL DE TEMÁTICAS CON ANCHO Y ALTO PREDETERMINADO ===
 const INITIAL_THEMES = [
@@ -74,7 +77,7 @@ const globalRemoveBackground = (data, target, tolerance, feather) => {
   }
 };
 
-export default function App({ user, onBackToLanding, onLogout }) {
+export default function App({ user, profile, trial, onBackToLanding, onLogout }) {
   const [images, setImages] = useState([]);
   const [themes, setThemes] = useState(INITIAL_THEMES);
   const [newThemeName, setNewThemeName] = useState('');
@@ -124,6 +127,7 @@ export default function App({ user, onBackToLanding, onLogout }) {
   const [isDragging, setIsDragging] = useState(false);
   const [eyedropperActive, setEyedropperActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null); // { total, done } mientras se procesan varias imágenes
+  const [showTutorial, setShowTutorial] = useState(false);
 
   // Estado temporal de efectos para el sticker en edición
   const [editorEffects, setEditorEffects] = useState({
@@ -154,6 +158,26 @@ export default function App({ user, onBackToLanding, onLogout }) {
   
   const fileInputRef = useRef(null);
   const cropContainerRef = useRef(null);
+
+  // Muestra el tutorial guiado una sola vez por usuario (se marca en Firestore al terminarlo o saltearlo)
+  useEffect(() => {
+    if (profile && !profile.tutorialSeen) {
+      setShowTutorial(true);
+    }
+  }, [profile]);
+
+  const handleFinishTutorial = () => {
+    setShowTutorial(false);
+    if (user) {
+      updateDoc(doc(db, 'users', user.uid), { tutorialSeen: true }).catch((err) => {
+        console.error('No se pudo guardar el estado del tutorial: ', err);
+      });
+    }
+  };
+
+  const handleTutorialStep = (step) => {
+    if (step.requiresConfigOpen) setIsConfigOpen(true);
+  };
 
   // Carga dinámica de jsPDF para exportación de alta calidad
   useEffect(() => {
@@ -1178,6 +1202,13 @@ export default function App({ user, onBackToLanding, onLogout }) {
               </svg>
             </button>
           )}
+          <button
+            onClick={() => setShowTutorial(true)}
+            title="Repetir el tutorial"
+            className="hidden md:flex items-center justify-center w-8 h-8 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-white hover:border-slate-700 transition-colors cursor-pointer shrink-0"
+          >
+            ❓
+          </button>
           <div className="bg-gradient-to-tr from-violet-600 to-cyan-500 p-2.5 rounded-xl shadow-inner">
             <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -1210,6 +1241,26 @@ export default function App({ user, onBackToLanding, onLogout }) {
               </div>
             </div>
           )}
+
+          {/* Contador de días de prueba gratis restantes */}
+          {trial?.isTrial && (
+            <div
+              data-tour="trial-counter"
+              className={`border rounded-lg px-3 py-1.5 flex items-center gap-2 ${
+                trial.daysLeft <= 1
+                  ? 'bg-red-950/40 border-red-500/40 text-red-300'
+                  : trial.daysLeft <= 2
+                    ? 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+                    : 'bg-slate-900/80 border-slate-800'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${trial.daysLeft <= 2 ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}></span>
+              <span>
+                Prueba gratis: <strong>{trial.daysLeft === 0 ? 'último día' : `${trial.daysLeft} día${trial.daysLeft === 1 ? '' : 's'}`}</strong>
+              </span>
+            </div>
+          )}
+
           <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
             <span>Planchas: <strong>{packedSheets.length}</strong></span>
@@ -1247,7 +1298,7 @@ export default function App({ user, onBackToLanding, onLogout }) {
           {isConfigOpen && (
             <div className="flex flex-col gap-4 animate-fade-in">
               {/* 1. CONFIGURACIÓN DE PELÍCULA */}
-              <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-inner">
+              <div data-tour="config-pelicula" className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-inner">
                 <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                   <svg className="w-4 h-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
                   1. Configuración de Película
@@ -1327,7 +1378,7 @@ export default function App({ user, onBackToLanding, onLogout }) {
               </div>
 
               {/* 2. PLACHITAS POR TEMÁTICAS */}
-              <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-inner">
+              <div data-tour="config-tematicas" className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-inner">
                 <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                   <svg className="w-4 h-4 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
                   2. Planchitas por Temáticas
@@ -1431,7 +1482,7 @@ export default function App({ user, onBackToLanding, onLogout }) {
           )}
 
           {/* 3. SUBIR IMÁGENES */}
-          <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3">
+          <div data-tour="subir-imagenes" className="bg-slate-900/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3">
             <div className="flex justify-between items-center">
               <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                 <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
@@ -1507,7 +1558,7 @@ export default function App({ user, onBackToLanding, onLogout }) {
 
           {/* === STREAMING_CHUNK:Rendering uploaded stickers grid... === */}
           {/* 4. LISTADO EN GRILLA DE STICKERS CARGADOS */}
-          <div className="flex-1 flex flex-col gap-3 min-h-[300px]">
+          <div data-tour="grilla-stickers" className="flex-1 flex flex-col gap-3 min-h-[300px]">
             <div className="flex justify-between items-center bg-slate-900/30 p-2 rounded-xl border border-slate-800/60">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">
                 Stickers Cargados ({images.length})
@@ -1608,7 +1659,7 @@ export default function App({ user, onBackToLanding, onLogout }) {
           <div className="bg-slate-950 border border-slate-800 p-3 rounded-2xl flex flex-col lg:flex-row justify-between items-center gap-3 shadow-md shrink-0">
             
             {/* Opciones de Empaquetado */}
-            <div className="flex flex-wrap items-center gap-2">
+            <div data-tour="organizacion" className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-bold text-slate-400 ml-2">Organización:</span>
               <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
                 <button 
@@ -1694,7 +1745,8 @@ export default function App({ user, onBackToLanding, onLogout }) {
             </div>
 
             {/* Botón de Exportación Premium */}
-            <button 
+            <button
+              data-tour="generar-pdf"
               onClick={generatePDF}
               disabled={packedSheets.length === 0 || isGeneratingPdf}
               className={`px-5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 shadow-lg transition-all ${
@@ -1792,7 +1844,7 @@ export default function App({ user, onBackToLanding, onLogout }) {
               </div>
 
               {/* El Film de impresión */}
-              <div className="flex-1 overflow-auto flex justify-center items-center bg-slate-900/60 rounded-xl border border-slate-800 p-6 relative">
+              <div data-tour="lienzo" className="flex-1 overflow-auto flex justify-center items-center bg-slate-900/60 rounded-xl border border-slate-800 p-6 relative">
                 {packedSheets[activeSheetIndex] ? (
                   <div 
                     className="relative bg-slate-950 border border-dashed border-slate-700 shadow-2xl transition-all"
@@ -2510,6 +2562,10 @@ export default function App({ user, onBackToLanding, onLogout }) {
 
           </div>
         </div>
+      )}
+
+      {showTutorial && (
+        <Tutorial onFinish={handleFinishTutorial} onBeforeStep={handleTutorialStep} />
       )}
 
     </div>

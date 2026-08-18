@@ -22,7 +22,7 @@ function LoadingScreen() {
 function Root() {
   const [path, setPath] = useState(window.location.pathname);
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const { user, authLoading, trial } = useAuth();
+  const { user, profile, authLoading, trial } = useAuth();
 
   useEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
@@ -78,7 +78,15 @@ function Root() {
     if (trial.isTrial && trial.isExpired) {
       return <TrialExpired user={user} onLogout={handleLogout} onGoToPricing={goToPricing} />;
     }
-    return <App user={user} onBackToLanding={() => navigate('/')} onLogout={handleLogout} />;
+    return (
+      <App
+        user={user}
+        profile={profile}
+        trial={trial}
+        onBackToLanding={() => navigate('/')}
+        onLogout={handleLogout}
+      />
+    );
   }
 
   return (
