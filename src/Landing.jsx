@@ -230,13 +230,6 @@ function Calculator() {
 }
 
 function PricingSection({ onEnterApp }) {
-  const [notice, setNotice] = useState(null);
-
-  const handleSubscribe = (plan) => {
-    setNotice(plan.id);
-    setTimeout(() => setNotice(null), 4000);
-  };
-
   return (
     <section id="planes" className="max-w-6xl mx-auto px-6 py-16 md:py-20">
       <div className="text-center max-w-2xl mx-auto mb-12">
@@ -244,6 +237,10 @@ function PricingSection({ onEnterApp }) {
         <p className="mt-3 text-slate-400 text-sm md:text-base">
           Precio de lanzamiento por tiempo limitado. Todos los planes incluyen el mismo motor de
           armado automático de planchas.
+        </p>
+        <p className="mt-3 text-[11px] text-amber-300/90 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2 inline-block">
+          ⚠️ Pagá con el mismo correo de tu cuenta en ImProX: así activamos tu plan automáticamente
+          apenas se apruebe el pago.
         </p>
       </div>
 
@@ -286,21 +283,18 @@ function PricingSection({ onEnterApp }) {
               ))}
             </ul>
 
-            <button
-              onClick={() => handleSubscribe(plan)}
-              className={`w-full py-3 rounded-xl text-sm font-extrabold transition-all active:scale-95 cursor-pointer ${
+            <a
+              href={plan.paymentLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`w-full py-3 rounded-xl text-sm font-extrabold transition-all active:scale-95 cursor-pointer text-center ${
                 plan.highlight
                   ? 'bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white shadow-lg'
                   : 'bg-slate-800 hover:bg-slate-750 text-slate-100 border border-slate-700'
               }`}
             >
-              Suscribirme
-            </button>
-            {notice === plan.id && (
-              <p className="text-[11px] text-center text-amber-300 -mt-2 animate-fade-in">
-                🚀 Muy pronto vas a poder pagar acá con Mercado Pago. ¡Gracias por la paciencia!
-              </p>
-            )}
+              Suscribirme →
+            </a>
           </div>
         ))}
       </div>

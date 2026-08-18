@@ -14,8 +14,10 @@
 
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { onRequest } = require('firebase-functions/v2/https');
+const { defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 initializeApp();
 const db = getFirestore();
@@ -25,6 +27,19 @@ const APP_URL = 'https://improx.vercel.app';
 // al configurar la extensión "Trigger Email from Firestore".
 const FROM_ADDRESS = 'ImProX <no-reply@improx.app>';
 const TRIAL_DAYS = 7;
+
+// Access Token de producción de Mercado Pago (Developers → Tus integraciones →
+// credenciales de producción). Se configura como secret, nunca como texto plano:
+//   firebase functions:secrets:set MP_ACCESS_TOKEN
+const MP_ACCESS_TOKEN = defineSecret('MP_ACCESS_TOKEN');
+
+// Debe coincidir con src/plans.js (id, name, price). Se duplica acá porque
+// functions/ es un proyecto Node/CommonJS aparte del frontend (Vite/ESM).
+const PLANS = [
+  { id: 'base', name: 'Base', price: 2000 },
+  { id: 'medio', name: 'Medio', price: 3000 },
+  { id: 'premium', name: 'Premium', price: 8000 },
+];
 
 const emailLayout = (title, bodyHtml) => `
   <div style="font-family: Arial, Helvetica, sans-serif; max-width: 480px; margin: 0 auto; color: #1e293b;">
@@ -44,11 +59,45 @@ const ctaButton = (href, label) => `
 
 // Se dispara apenas se crea el perfil de un usuario nuevo, justo cuando arranca su
 // prueba gratis (ver src/useAuth.js: el perfil se crea en el primer login).
+//
+// Si alguien pagó un plan ANTES de crearse la cuenta (pagó desde la landing con el
+// mismo correo, pero todavía no había iniciado sesión en ImProX), mercadoPagoWebhook
+// dejó una "activación pendiente" guardada por correo: acá la consumimos y el usuario
+// arranca directo con el plan pago en vez de con el trial.
 exports.sendWelcomeEmail = onDocumentCreated('users/{uid}', async (event) => {
-  const data = event.data?.data();
+  const snap = event.data;
+  const data = snap?.data();
   if (!data?.email) return;
 
   const greeting = data.displayName ? `Hola ${data.displayName},` : 'Hola,';
+  const emailKey = data.email.toLowerCase();
+
+  const pendingRef = db.collection('pendingActivations').doc(emailKey);
+  const pendingSnap = await pendingRef.get();
+
+  if (pendingSnap.exists) {
+    const pending = pendingSnap.data();
+    const plan = PLANS.find((p) => p.id === pending.planId);
+    if (plan) {
+      await snap.ref.update({ plan: plan.id, planActivatedAt: FieldValue.serverTimestamp() });
+      await pendingRef.delete();
+
+      await db.collection('mail').add({
+        to: data.email,
+        from: FROM_ADDRESS,
+        message: {
+          subject: `¡Bienvenido a ImProX! Tu plan ${plan.name} ya está activo 🎉`,
+          html: emailLayout('¡Bienvenido a ImProX!', `
+            <p>${greeting}</p>
+            <p>Ya habíamos recibido tu pago del plan <strong>${plan.name}</strong>: tu cuenta arranca
+            directo con ese plan activo, sin límite de prueba.</p>
+            ${ctaButton(`${APP_URL}/app`, 'Entrar a ImProX')}
+          `),
+        },
+      });
+      return;
+    }
+  }
 
   await db.collection('mail').add({
     to: data.email,
@@ -110,3 +159,106 @@ exports.sendTrialReminder = onSchedule(
     await Promise.all(jobs);
   }
 );
+
+// Webhook de Mercado Pago: se configura en Developers → Tus integraciones → tu
+// aplicación → Webhooks, apuntando a la URL de esta función (la ves en la consola
+// de Firebase → Functions, después del primer deploy).
+//
+// Los links de pago de la landing son fijos por plan (no personalizados por usuario),
+// así que identificamos qué plan se compró por el MONTO pagado, y a qué cuenta de
+// ImProX corresponde por el CORREO con el que se pagó. Por eso la landing le pide al
+// usuario que pague con el mismo correo de su cuenta.
+//
+// Importante: nunca confiamos en el contenido del webhook en sí (cualquiera podría
+// mandarnos un POST fabricado). Apenas llega un aviso, volvemos a consultar el pago
+// real en la API de Mercado Pago con nuestro Access Token antes de activar nada.
+// Además es idempotente (guarda cada payment id ya procesado) para no reprocesar
+// reintentos del mismo aviso.
+exports.mercadoPagoWebhook = onRequest({ secrets: [MP_ACCESS_TOKEN] }, async (req, res) => {
+  try {
+    const paymentId = req.body?.data?.id || req.query['data.id'] || req.query.id;
+    if (!paymentId) {
+      res.status(200).send('ignored: sin payment id');
+      return;
+    }
+
+    const processedRef = db.collection('payments').doc(String(paymentId));
+    if ((await processedRef.get()).exists) {
+      res.status(200).send('ya procesado');
+      return;
+    }
+
+    const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+      headers: { Authorization: `Bearer ${MP_ACCESS_TOKEN.value()}` },
+    });
+
+    if (!mpResponse.ok) {
+      console.error('No se pudo consultar el pago en Mercado Pago', paymentId, mpResponse.status);
+      res.status(200).send('no se pudo verificar el pago');
+      return;
+    }
+
+    const payment = await mpResponse.json();
+
+    if (payment.status !== 'approved') {
+      res.status(200).send(`estado del pago: ${payment.status}`);
+      return;
+    }
+
+    const payerEmail = payment.payer?.email?.toLowerCase();
+    const amount = payment.transaction_amount;
+    const plan = PLANS.find((p) => Math.abs(p.price - amount) < 1);
+
+    if (!payerEmail || !plan) {
+      console.warn('Pago aprobado pero no se pudo identificar plan o correo', { paymentId, payerEmail, amount });
+      await processedRef.set({ processedAt: FieldValue.serverTimestamp(), matched: false, payerEmail: payerEmail || null, amount });
+      res.status(200).send('pago aprobado pero sin plan/correo identificable');
+      return;
+    }
+
+    const usersSnap = await db.collection('users').where('email', '==', payerEmail).limit(1).get();
+
+    if (usersSnap.empty) {
+      // Pagó pero todavía no tiene cuenta en ImProX (o se registró con otro correo).
+      // Dejamos la activación pendiente: sendWelcomeEmail la consume si esa cuenta se crea después.
+      await db.collection('pendingActivations').doc(payerEmail).set({
+        planId: plan.id,
+        paymentId: String(paymentId),
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      await processedRef.set({ processedAt: FieldValue.serverTimestamp(), matched: false, payerEmail, plan: plan.id });
+      res.status(200).send('pago aprobado, sin cuenta todavía: activación pendiente guardada');
+      return;
+    }
+
+    const userDoc = usersSnap.docs[0];
+    await userDoc.ref.update({ plan: plan.id, planActivatedAt: FieldValue.serverTimestamp() });
+
+    await db.collection('mail').add({
+      to: payerEmail,
+      from: FROM_ADDRESS,
+      message: {
+        subject: `¡Pago aprobado! Ya tenés el plan ${plan.name} en ImProX 🎉`,
+        html: emailLayout('¡Pago aprobado!', `
+          <p>Tu pago se acreditó correctamente y tu suscripción al plan <strong>${plan.name}</strong>
+          ya está activa en tu cuenta de ImProX.</p>
+          ${ctaButton(`${APP_URL}/app`, 'Entrar a ImProX')}
+        `),
+      },
+    });
+
+    await processedRef.set({
+      processedAt: FieldValue.serverTimestamp(),
+      matched: true,
+      plan: plan.id,
+      uid: userDoc.id,
+      payerEmail,
+    });
+
+    res.status(200).send('ok');
+  } catch (err) {
+    console.error('Error procesando webhook de Mercado Pago', err);
+    // Respondemos 200 igual para que Mercado Pago no reintente en loop; el error queda logueado.
+    res.status(200).send('error interno, revisar logs');
+  }
+});

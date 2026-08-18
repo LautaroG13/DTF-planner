@@ -1,7 +1,7 @@
-// Configuración compartida de planes: la usan tanto la landing (para mostrar precios)
-// como la app (para saber qué mostrarle a cada usuario). El cobro real con Mercado
-// Pago todavía no está conectado, así que hoy ningún usuario pasa de "trial"
-// automáticamente — eso es un paso siguiente.
+// Configuración compartida de planes: la usan tanto la landing (para mostrar precios
+// y los links de pago) como la app (para saber qué mostrarle a cada usuario).
+// Los precios acá deben coincidir con los de functions/index.js (mercadoPagoWebhook
+// identifica el plan comprado por el monto pagado).
 
 export const TRIAL_DAYS = 7;
 
@@ -11,6 +11,7 @@ export const PLANS = [
     name: 'Base',
     price: 2000,
     oldPrice: 10000,
+    paymentLink: 'https://mpago.la/1ZjtDv3',
     tagline: 'Para arrancar y probar la herramienta a fondo.',
     downloadLimit: '20 descargas por mes',
     features: [
@@ -26,6 +27,7 @@ export const PLANS = [
     name: 'Medio',
     price: 3000,
     oldPrice: 15000,
+    paymentLink: 'https://mpago.la/1w7KKj9',
     tagline: 'El más elegido: suma edición avanzada de imagen.',
     downloadLimit: '150 descargas por mes',
     features: [
@@ -41,6 +43,7 @@ export const PLANS = [
     name: 'Premium',
     price: 8000,
     oldPrice: 45000,
+    paymentLink: 'https://mpago.la/2HwvPD6',
     tagline: 'Para talleres con volumen alto de impresión.',
     downloadLimit: 'Descargas ilimitadas',
     features: [
