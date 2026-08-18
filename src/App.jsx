@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { auth, googleProvider } from './firebase.js';
 
 // === CONFIGURACIÓN INICIAL DE TEMÁTICAS CON ANCHO Y ALTO PREDETERMINADO ===
 const INITIAL_THEMES = [
@@ -125,6 +127,10 @@ export default function App({ onBackToLanding }) {
   const [eyedropperActive, setEyedropperActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null); // { total, done } mientras se procesan varias imágenes
 
+  // Sesión con Google (Firebase Auth)
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
   // Estado temporal de efectos para el sticker en edición
   const [editorEffects, setEditorEffects] = useState({
     removeBg: false,
@@ -154,6 +160,38 @@ export default function App({ onBackToLanding }) {
   
   const fileInputRef = useRef(null);
   const cropContainerRef = useRef(null);
+
+  // Escucha el estado de sesión de Firebase (login/logout con Google)
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthChecked(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLoginGoogle = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      console.error('Error al iniciar sesión con Google: ', err);
+      if (err.code === 'auth/admin-restricted-operation') {
+        alert("El inicio de sesión con Google está restringido en este proyecto de Firebase. Activá el proveedor 'Google' en Authentication → Sign-in method dentro de la consola de Firebase.");
+      } else if (err.code === 'auth/unauthorized-domain') {
+        alert('Este dominio no está autorizado para iniciar sesión. Agregalo en Firebase → Authentication → Settings → Authorized domains.');
+      } else if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+        alert('No se pudo iniciar sesión con Google. Probá de nuevo.');
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error('Error al cerrar sesión: ', err);
+    }
+  };
 
   // Carga dinámica de jsPDF para exportación de alta calidad
   useEffect(() => {
@@ -1192,6 +1230,36 @@ export default function App({ onBackToLanding }) {
         </div>
 
         <div className="flex flex-wrap gap-3 items-center text-sm">
+          {/* Sesión con Google */}
+          {authChecked && (
+            user ? (
+              <div className="flex items-center gap-2.5 bg-slate-900/80 border border-slate-800 pl-2 pr-3 py-1.5 rounded-2xl">
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt={user.displayName || 'Usuario'} className="w-6 h-6 rounded-full border border-slate-700" referrerPolicy="no-referrer" />
+                ) : (
+                  <span className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-black text-slate-300">
+                    {(user.displayName || user.email || '?').charAt(0).toUpperCase()}
+                  </span>
+                )}
+                <div className="text-xs leading-tight">
+                  <p className="font-bold text-slate-200 leading-none max-w-[120px] truncate">{user.displayName || user.email}</p>
+                  <button onClick={handleLogout} className="text-[10px] text-red-400 hover:text-red-300 hover:underline mt-0.5 block leading-none bg-transparent border-none p-0 cursor-pointer">
+                    Cerrar sesión
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={handleLoginGoogle}
+                className="bg-slate-900 hover:bg-slate-850 text-slate-200 border border-slate-800 hover:border-slate-700 px-3.5 py-1.5 rounded-2xl text-xs font-bold transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+              >
+                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12.24 10.285V13.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.866-3.577-7.866-8s3.536-8 7.866-8c2.46 0 4.105 1.025 5.047 1.926l2.427-2.334C17.955 2.192 15.34 1 12.24 1 6.12 1 1.16 6.12 1 12.24s5.12 11.24 11.24 11.24c6.38 0 10.62-4.474 10.62-10.782 0-.728-.08-1.284-.176-1.848H12.24z"/>
+                </svg>
+                <span>Ingresar con Google</span>
+              </button>
+            )
+          )}
           <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
             <span>Planchas: <strong>{packedSheets.length}</strong></span>
