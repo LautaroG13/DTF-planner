@@ -1,5 +1,6 @@
 import { StrictMode, useState, useEffect, useCallback } from 'react'
 import { createRoot } from 'react-dom/client'
+import { Analytics } from '@vercel/analytics/react'
 import { signOut } from 'firebase/auth'
 import './index.css'
 import App from './App.jsx'
@@ -8,6 +9,9 @@ import AuthModal from './AuthModal.jsx'
 import TrialExpired from './TrialExpired.jsx'
 import { useAuth } from './useAuth.js'
 import { auth } from './firebase.js'
+import { initGoogleAnalytics, trackPageview } from './analytics.js'
+
+initGoogleAnalytics();
 
 function LoadingScreen() {
   return (
@@ -34,6 +38,7 @@ function Root() {
     window.history.pushState({}, '', to);
     setPath(to);
     window.scrollTo(0, 0);
+    trackPageview(to);
   }, []);
 
   // Nadie entra a "/app" sin sesión: lo mandamos de vuelta a la landing con el login abierto.
@@ -102,5 +107,6 @@ function Root() {
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <Root />
+    <Analytics />
   </StrictMode>,
 )
