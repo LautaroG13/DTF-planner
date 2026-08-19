@@ -7,6 +7,7 @@ import App from './App.jsx'
 import Landing from './Landing.jsx'
 import AuthModal from './AuthModal.jsx'
 import TrialExpired from './TrialExpired.jsx'
+import VerifyEmail from './VerifyEmail.jsx'
 import { useAuth } from './useAuth.js'
 import { auth } from './firebase.js'
 import { initGoogleAnalytics, trackPageview } from './analytics.js'
@@ -26,7 +27,7 @@ function LoadingScreen() {
 function Root() {
   const [path, setPath] = useState(window.location.pathname);
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const { user, profile, authLoading, trial } = useAuth();
+  const { user, profile, authLoading, trial, refreshUser } = useAuth();
 
   useEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
@@ -77,6 +78,13 @@ function Root() {
     navigate('/');
     setTimeout(() => document.getElementById('planes')?.scrollIntoView({ behavior: 'smooth' }), 50);
   }, [navigate]);
+
+  // Cuenta creada pero correo sin confirmar: no la dejamos usar nada (ni la
+  // landing con sesión "activa") hasta que verifique. Google ya viene siempre
+  // verificado, así que esto solo frena el registro por correo/contraseña.
+  if (user && !user.emailVerified) {
+    return <VerifyEmail user={user} onCheckAgain={refreshUser} />;
+  }
 
   if (path.startsWith('/app')) {
     if (authLoading || !user) return <LoadingScreen />;

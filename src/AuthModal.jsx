@@ -4,6 +4,7 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
   sendPasswordResetEmail,
+  sendEmailVerification,
 } from 'firebase/auth';
 import { auth, googleProvider } from './firebase.js';
 import { TRIAL_DAYS } from './plans.js';
@@ -46,7 +47,10 @@ export default function AuthModal({ onClose, onSuccess }) {
     setLoading(true);
     try {
       if (mode === 'signup') {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const credential = await createUserWithEmailAndPassword(auth, email, password);
+        // No confiamos en el correo hasta que se verifique: así una cuenta nueva no
+        // puede "ocupar" el email de otra persona para robarle una activación de plan.
+        await sendEmailVerification(credential.user, { url: 'https://improx.vercel.app/' });
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }

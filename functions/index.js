@@ -18,6 +18,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getAuth } = require('firebase-admin/auth');
 
 initializeApp();
 const db = getFirestore();
@@ -262,3 +263,34 @@ exports.mercadoPagoWebhook = onRequest({ secrets: [MP_ACCESS_TOKEN] }, async (re
     res.status(200).send('error interno, revisar logs');
   }
 });
+
+// El front (src/useAuth.js) ya no crea el perfil de Firestore de una cuenta hasta
+// que verifica el correo — así nadie puede "ocupar" el email de otra persona para
+// robarle una activación de plan. El efecto secundario es que alguien podría
+// registrarse con un correo ajeno y dejarlo sin verificar para siempre, bloqueando
+// que el dueño real se registre con ese mismo correo. Esta función limpia esas
+// cuentas fantasma: corre a diario y borra las que llevan más de 7 días sin
+// verificar (nunca llegaron a tener trial ni plan, así que no se pierde nada real).
+exports.cleanupUnverifiedAccounts = onSchedule(
+  { schedule: 'every day 04:00', timeZone: 'America/Argentina/Buenos_Aires' },
+  async () => {
+    const auth = getAuth();
+    const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const uidsToDelete = [];
+    let pageToken;
+
+    do {
+      const result = await auth.listUsers(1000, pageToken);
+      result.users.forEach((u) => {
+        if (!u.emailVerified && new Date(u.metadata.creationTime).getTime() < cutoffMs) {
+          uidsToDelete.push(u.uid);
+        }
+      });
+      pageToken = result.pageToken;
+    } while (pageToken);
+
+    for (let i = 0; i < uidsToDelete.length; i += 1000) {
+      await auth.deleteUsers(uidsToDelete.slice(i, i + 1000));
+    }
+  }
+);

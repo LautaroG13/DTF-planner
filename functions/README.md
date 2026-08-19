@@ -1,17 +1,26 @@
 # Cloud Functions de ImProX (mails + activación de pagos)
 
-Este directorio tiene el código de tres Cloud Functions:
+Este directorio tiene el código de cuatro Cloud Functions:
 
-- **`sendWelcomeEmail`**: se dispara sola apenas alguien se registra (cuando se crea
-  su perfil en Firestore) y le manda el mail de bienvenida. Si esa persona ya había
-  pagado un plan antes de registrarse (mismo correo), la cuenta arranca directo con
-  ese plan activo en vez de con el trial.
+- **`sendWelcomeEmail`**: se dispara sola apenas alguien verifica su correo y se
+  crea su perfil en Firestore, y le manda el mail de bienvenida. Si esa persona ya
+  había pagado un plan antes de registrarse (mismo correo), la cuenta arranca
+  directo con ese plan activo en vez de con el trial.
 - **`sendTrialReminder`**: corre todos los días a las 9am (hora Argentina) y le
   manda un recordatorio a quien le queda 1 día de prueba gratis ("mañana se te
   corta el acceso").
 - **`mercadoPagoWebhook`**: recibe el aviso de Mercado Pago cuando se aprueba un
   pago, activa el plan correspondiente en la cuenta de ImProX que coincida por
   correo, y manda el mail de "pago aprobado".
+- **`cleanupUnverifiedAccounts`**: corre a diario y borra las cuentas que se
+  registraron con correo/contraseña y nunca verificaron el correo en 7 días (evita
+  que alguien deje "ocupado" para siempre el correo de otra persona sin usarlo).
+
+El registro con correo y contraseña ahora exige verificar el email antes de poder
+usar la herramienta: el perfil de Firestore (y el arranque del trial) recién se
+crea cuando `user.emailVerified` es `true`. Antes no era así, y eso permitía que
+alguien se registrara con el correo de otra persona para robarle la activación de
+un plan pago cuando esa persona pagara de verdad (ver `mercadoPagoWebhook` abajo).
 
 Los mails no se mandan directamente desde el código: se escribe un documento en la
 colección `mail` de Firestore, y una extensión oficial de Firebase se encarga
@@ -86,13 +95,22 @@ Desde una terminal, parado en la raíz de este repo:
 ```bash
 npm install -g firebase-tools
 firebase login
-firebase deploy --only functions
+firebase deploy --only functions,firestore:rules
 ```
 
-Con eso quedan publicadas las tres funciones. Podés confirmar que están activas
-en la consola de Firebase → **Functions** — ahí también vas a ver la URL pública
-de `mercadoPagoWebhook` (algo como
+Con eso quedan publicadas las cuatro funciones (`sendWelcomeEmail`,
+`sendTrialReminder`, `mercadoPagoWebhook`, `cleanupUnverifiedAccounts`) **y**
+las reglas de seguridad de Firestore (`firestore.rules`). Podés confirmar que
+las funciones están activas en la consola de Firebase → **Functions** — ahí
+también vas a ver la URL pública de `mercadoPagoWebhook` (algo como
 `https://us-central1-dtf-planner.cloudfunctions.net/mercadoPagoWebhook`).
+
+**Importante:** el paso `firestore:rules` no es opcional. Sin las reglas de
+`firestore.rules` desplegadas, cualquier usuario logueado puede escribir su
+propio documento en `users/{uid}` directo desde el navegador y ponerse
+`plan: 'premium'` sin pagar nada — las reglas son lo único que se lo impide
+(las Cloud Functions usan el Admin SDK y las esquivan siempre, así que
+`mercadoPagoWebhook` y los recordatorios siguen funcionando igual).
 
 ## 7. Configurar el webhook en Mercado Pago
 
@@ -147,8 +165,16 @@ verificación de firma (`x-signature`) que documenta Mercado Pago.
 ## Nota sobre seguridad
 
 Estas funciones usan el SDK de administrador de Firebase, así que no dependen
-de las reglas de seguridad de Firestore para funcionar. Pero el resto de la
-app (el conteo de días de prueba en el cliente) sigue sin reglas de
-seguridad configuradas — es un límite "blando" que un usuario técnico podría
-manipular. Si querés, en otro paso puedo dejarte el texto de reglas de
-Firestore para cerrar eso.
+de las reglas de seguridad de Firestore para funcionar — `mercadoPagoWebhook`
+y los recordatorios siguen andando igual aunque las reglas estén activas.
+
+El resto de la app ya está cerrado con dos cambios:
+
+1. **`firestore.rules`** (raíz del repo) impide que un usuario logueado escriba
+   `plan` o `trialStartedAt` en su propio perfil desde el navegador — antes
+   cualquiera podía auto-otorgarse un plan pago editando esos campos a mano
+   desde la consola. Solo el Admin SDK (las Cloud Functions) puede tocarlos.
+   Recordá desplegarlas con `firebase deploy --only firestore:rules` (paso 6).
+2. **Verificación de correo obligatoria** antes de crear el perfil (y arrancar
+   el trial), para que nadie pueda registrarse con el correo de otra persona
+   y robarle la activación de un plan pago.
