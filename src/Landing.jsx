@@ -138,6 +138,28 @@ function FeaturesSection() {
   );
 }
 
+// Definido fuera de Calculator a propósito: si estuviera adentro, React lo trata
+// como un componente nuevo en cada tecla que se apreta (nueva identidad de función
+// en cada render) y remonta el <input>, haciéndole perder el foco todo el tiempo.
+function Field({ label, value, onChange, suffix, min = 0, step = 1 }) {
+  return (
+    <div>
+      <label className="text-[11px] text-slate-400 font-semibold block mb-1">{label}</label>
+      <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden focus-within:ring-1 focus-within:ring-cyan-500">
+        <input
+          type="number"
+          value={value}
+          min={min}
+          step={step}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full bg-transparent px-3 py-2 text-sm font-bold text-slate-100 focus:outline-none"
+        />
+        {suffix && <span className="pr-3 text-[11px] text-slate-500 font-mono">{suffix}</span>}
+      </div>
+    </div>
+  );
+}
+
 function Calculator() {
   const [filmPrice, setFilmPrice] = useState(12000);
   const [rollWidth, setRollWidth] = useState(58);
@@ -162,23 +184,6 @@ function Calculator() {
 
     return { itemsPerRow, rows, metersNeeded, totalCost, costPerUnit };
   }, [filmPrice, rollWidth, designWidth, designHeight, quantity]);
-
-  const Field = ({ label, value, onChange, suffix, min = 0, step = 1 }) => (
-    <div>
-      <label className="text-[11px] text-slate-400 font-semibold block mb-1">{label}</label>
-      <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg overflow-hidden focus-within:ring-1 focus-within:ring-cyan-500">
-        <input
-          type="number"
-          value={value}
-          min={min}
-          step={step}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full bg-transparent px-3 py-2 text-sm font-bold text-slate-100 focus:outline-none"
-        />
-        {suffix && <span className="pr-3 text-[11px] text-slate-500 font-mono">{suffix}</span>}
-      </div>
-    </div>
-  );
 
   return (
     <section id="calculadora" className="max-w-6xl mx-auto px-6 py-16 md:py-20">
