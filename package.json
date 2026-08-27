@@ -1,5 +1,5 @@
 {
-  "name": "dtf-planner",
+  "name": "improx",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "firebase": "^12.14.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

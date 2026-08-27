@@ -1,0 +1,52 @@
+rules_version = '2';
+
+// Reglas de Firestore para ImProX.
+//
+// Corrige la vulnerabilidad donde cualquier usuario logueado podía escribir
+// directo su propio perfil desde la consola del navegador (mismo SDK y config
+// pública que usa la app) y ponerse plan: 'premium' sin pagar nada.
+//
+// Las Cloud Functions (functions/index.js) usan el Admin SDK, que SIEMPRE
+// esquiva estas reglas — así que mercadoPagoWebhook y sendWelcomeEmail
+// siguen pudiendo activar planes sin problema.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+
+      // Alta del perfil: solo el propio usuario, y siempre arranca en modo
+      // prueba (nunca puede crear su perfil ya con un plan pago).
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.plan == 'trial';
+
+      // Edición: el usuario puede tocar su propio perfil (por ej. tutorialSeen),
+      // pero "plan" y "trialStartedAt" — los campos que determinan su acceso —
+      // solo los puede cambiar el Admin SDK, nunca el cliente.
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.plan == resource.data.plan
+        && request.resource.data.trialStartedAt == resource.data.trialStartedAt;
+
+      allow delete: if false;
+    }
+
+    // Colecciones internas de las Cloud Functions: el cliente nunca necesita
+    // leerlas ni escribirlas directamente.
+    match /mail/{docId} {
+      allow read, write: if false;
+    }
+    match /pendingActivations/{docId} {
+      allow read, write: if false;
+    }
+    match /payments/{docId} {
+      allow read, write: if false;
+    }
+
+    // Cualquier otra colección: denegado por defecto.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
