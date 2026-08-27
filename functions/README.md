@@ -63,7 +63,21 @@ Creá la cuenta, verificá tu dominio o remitente, y guardá los datos SMTP
      colección que usan las Cloud Functions de este repo).
    - **Configuración SMTP**: host, puerto, usuario y contraseña del proveedor
      que elegiste en el paso 2.
+   - **Ubicación de Cloud Functions ("Cloud Functions location")**: tiene que
+     coincidir con la región de tu base de Firestore. Este proyecto
+     (`dtf-planner`) tiene su Firestore en la multi-región **nam5** (EE.UU.),
+     así que elegí **`us-central1`**. Si elegís otra (por ejemplo
+     `southamerica-east1`), la instalación falla con un error tipo
+     `Database '(default)' does not exist in region ...` — si te pasa eso,
+     desinstalá la extensión y volvé a instalarla eligiendo `us-central1`.
+     (Para ver la región de tu propia base: Firestore Database → pestaña
+     Datos, se muestra arriba junto al nombre `(default)`.)
 3. Confirmá la instalación (puede tardar unos minutos).
+
+Por la misma razón, `functions/index.js` fija `us-central1` como región para
+todas las Cloud Functions de este repo (`setGlobalOptions`) — así
+`sendWelcomeEmail`, que escucha cambios en Firestore, queda en la misma
+región que la base y no falla por el mismo motivo.
 
 ## 4. Ajustar el remitente en el código (opcional pero recomendado)
 

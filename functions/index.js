@@ -15,10 +15,18 @@
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onRequest } = require('firebase-functions/v2/https');
+const { setGlobalOptions } = require('firebase-functions/v2');
 const { defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
+
+// La base de Firestore de este proyecto vive en la multi-región "nam5" (EE.UU.).
+// Para triggers de Firestore, la región de Cloud Functions compatible es
+// us-central1 — si se despliega en otra (ej. southamerica-east1) falla con
+// "Database '(default)' does not exist in region ...". Todas las funciones de
+// este archivo heredan esta región salvo que se indique lo contrario.
+setGlobalOptions({ region: 'us-central1' });
 
 initializeApp();
 const db = getFirestore();
